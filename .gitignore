@@ -16,8 +16,12 @@ override.tf.json
 .vscode/
 .idea/
 
+# Python venv
 nr/
 venv/
 .venv/
 __pycache__/
 *.pyc
+
+# Secrets / keys
+*.pem
