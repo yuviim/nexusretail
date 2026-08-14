@@ -1,6 +1,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
+import { requireAuth, AuthenticatedRequest } from './middleware/auth';
 
 dotenv.config();
 
@@ -10,23 +11,14 @@ const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// Health check — the ALB hits this to determine task health
 app.get('/', (req, res) => {
   res.status(200).send('NexusRetail API is alive');
 });
 
-// First real endpoint: list products for a tenant
-app.get('/products', async (req, res) => {
+app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    // Hardcoded tenant for now — real auth/tenant-context comes later
-    const tenant = await prisma.tenant.findFirst();
-
-    if (!tenant) {
-      return res.status(404).json({ error: 'No tenant found' });
-    }
-
     const products = await prisma.product.findMany({
-      where: { tenantId: tenant.id },
+      where: { tenantId: req.tenantId },
       include: {
         stockLevels: {
           include: { warehouse: true },
@@ -41,18 +33,10 @@ app.get('/products', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`NexusRetail API listening on port ${PORT}`);
-});
-
-// List all orders for the tenant
-app.get('/orders', async (req, res) => {
+app.get('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const tenant = await prisma.tenant.findFirst();
-    if (!tenant) return res.status(404).json({ error: 'No tenant found' });
-
     const orders = await prisma.order.findMany({
-      where: { tenantId: tenant.id },
+      where: { tenantId: req.tenantId },
       include: {
         customer: true,
         items: {
@@ -69,8 +53,7 @@ app.get('/orders', async (req, res) => {
   }
 });
 
-// Get a single order's full detail
-app.get('/orders/:id', async (req, res) => {
+app.get('/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const order = await prisma.order.findUnique({
       where: { id: req.params.id },
@@ -82,7 +65,9 @@ app.get('/orders/:id', async (req, res) => {
       },
     });
 
-    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (!order || order.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
 
     res.json(order);
   } catch (err) {
@@ -90,14 +75,19 @@ app.get('/orders/:id', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-// Update an order's status
-app.patch('/orders/:id/status', async (req, res) => {
+
+app.patch('/orders/:id/status', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { status } = req.body;
     const validStatuses = ['placed', 'stock_reserved', 'payment', 'fulfilled'];
 
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const existing = await prisma.order.findUnique({ where: { id: req.params.id } });
+    if (!existing || existing.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Order not found' });
     }
 
     const order = await prisma.order.update({
@@ -110,4 +100,8 @@ app.patch('/orders/:id/status', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`NexusRetail API listening on port ${PORT}`);
 });
