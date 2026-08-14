@@ -5,6 +5,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: DashboardIcon },
   { to: '/inventory', label: 'Inventory', icon: BoxIcon },
   { to: '/orders', label: 'Orders', icon: CartIcon },
+  { to: '/team', label: 'Team', icon: TeamIcon },
 ];
 
 export default function Layout() {
@@ -95,6 +96,16 @@ function CartIcon(props: React.SVGProps<SVGSVGElement>) {
       <circle cx="9" cy="20" r="1.4" />
       <circle cx="18" cy="20" r="1.4" />
       <path d="M2 3h2l2.4 12.2a2 2 0 002 1.8h8.4a2 2 0 002-1.7L21 7H6" />
+    </svg>
+  );
+}
+function TeamIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...props} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 20c0-3.6 2.9-6.5 5.5-6.5s5.5 2.9 5.5 6.5" />
+      <circle cx="17.5" cy="9" r="2.4" />
+      <path d="M15.2 13.2c2.1.2 4.3 2 4.3 5.8" />
     </svg>
   );
 }

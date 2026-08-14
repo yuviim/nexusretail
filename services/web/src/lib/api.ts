@@ -63,6 +63,14 @@ export interface Order {
   items: OrderItem[];
 }
 
+export interface TeamMember {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  createdAt: string;
+}
+
 export const api = {
   getProducts: () => request<Product[]>('/products'),
   getOrders: () => request<Order[]>('/orders'),
@@ -71,5 +79,17 @@ export const api = {
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status }),
+    }),
+  getCustomers: () => request<Customer[]>('/customers'),
+  createOrder: (customerId: string, items: { productId: string; quantity: number }[]) =>
+    request<Order>('/orders', {
+      method: 'POST',
+      body: JSON.stringify({ customerId, items }),
+    }),
+  getTeam: () => request<TeamMember[]>('/team'),
+  inviteTeamMember: (email: string, name: string, role: string) =>
+    request<TeamMember>('/team', {
+      method: 'POST',
+      body: JSON.stringify({ email, name, role }),
     }),
 };
