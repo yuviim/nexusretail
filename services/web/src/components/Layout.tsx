@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { signOut, getUserEmail } from '../lib/auth';
-import { LayoutGrid, Package, ShoppingCart, Users, ChevronDown } from 'lucide-react';
+import { signOut, getUserEmail, isSuperAdmin } from '../lib/auth';
+import { LayoutGrid, Package, ShoppingCart, Users, ChevronDown, ShieldCheck } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutGrid },
@@ -13,6 +13,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const email = getUserEmail();
   const initials = email ? email.slice(0, 2).toUpperCase() : 'NR';
+  const showAdminLink = isSuperAdmin();
 
   function handleSignOut() {
     signOut();
@@ -47,6 +48,13 @@ export default function Layout() {
               </NavLink>
             ))}
           </nav>
+
+          {showAdminLink ? (
+            <a href="/admin" className="flex items-center gap-1.5 px-3 py-1.5 mr-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-[12.5px] font-medium text-white/90">
+              <ShieldCheck size={14} />
+              Platform admin
+            </a>
+          ) : null}
 
           <button
             onClick={handleSignOut}

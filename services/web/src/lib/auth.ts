@@ -63,3 +63,15 @@ export function getUserEmail(): string | null {
     return null;
   }
 }
+
+export function isSuperAdmin(): boolean {
+  const token = getIdToken();
+  if (!token) return false;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    const groups = payload['cognito:groups'] as string[] | undefined;
+    return groups?.includes('super-admin') ?? false;
+  } catch {
+    return false;
+  }
+}

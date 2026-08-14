@@ -71,6 +71,13 @@ export interface TeamMember {
   createdAt: string;
 }
 
+export interface Tenant {
+  id: string;
+  name: string;
+  createdAt: string;
+  _count: { users: number; products: number; orders: number };
+}
+
 export const api = {
   getProducts: () => request<Product[]>('/products'),
   getOrders: () => request<Order[]>('/orders'),
@@ -92,4 +99,5 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, name, role }),
     }),
+  getTenants: () => request<Tenant[]>('/admin/tenants'),
 };

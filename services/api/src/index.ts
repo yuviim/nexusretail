@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
-import { requireAuth, AuthenticatedRequest } from './middleware/auth';
+import { requireAuth, requireSuperAdmin, AuthenticatedRequest } from './middleware/auth';
 
 dotenv.config();
 
@@ -195,6 +195,45 @@ app.post('/team', requireAuth, async (req: AuthenticatedRequest, res) => {
     if (err.code === 'P2002') {
       return res.status(409).json({ error: 'A user with this email already exists' });
     }
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/admin/tenants', requireSuperAdmin, async (req, res) => {
+  try {
+    const tenants = await prisma.tenant.findMany({
+      include: {
+        _count: {
+          select: { users: true, products: true, orders: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    res.json(tenants);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/admin/tenants/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.params.id as string },
+      include: {
+        users: true,
+        products: { include: { stockLevels: { include: { warehouse: true } } } },
+        orders: { include: { customer: true, items: { include: { product: true } } } },
+        warehouses: true,
+      },
+    });
+
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+
+    res.json(tenant);
+  } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }

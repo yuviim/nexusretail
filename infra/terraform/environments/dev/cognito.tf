@@ -50,3 +50,8 @@ output "cognito_user_pool_id" {
 output "cognito_app_client_id" {
   value = aws_cognito_user_pool_client.app.id
 }
+resource "aws_cognito_user_group" "super_admin" {
+  name         = "super-admin"
+  user_pool_id = aws_cognito_user_pool.main.id
+  description  = "Platform-level administrators with cross-tenant access"
+}
