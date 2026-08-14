@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import type { Product, Warehouse } from '../lib/api';
-import { Package, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { Package, Plus, Trash2, X } from 'lucide-react';
 
 export default function Inventory() {
   const [products, setProducts] = useState<Product[] | null>(null);

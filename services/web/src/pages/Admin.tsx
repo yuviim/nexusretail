@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import type { Tenant } from '../lib/api';
-import { Building2, Users, Package, ShoppingCart } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 
 export default function Admin() {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
