@@ -64,23 +64,6 @@ resource "aws_security_group" "test" {
   }
 }
 
-# The test EC2 instance
-resource "aws_instance" "test" {
-  ami                         = data.aws_ami.amazon_linux.id
-  instance_type               = "t3.micro"
-  subnet_id                   = aws_subnet.public_1a.id
-  vpc_security_group_ids      = [aws_security_group.test.id]
-  key_name                    = aws_key_pair.test.key_name
-  associate_public_ip_address = true
-
-  tags = {
-    Name = "nexusretail-dev-test-instance"
-  }
-}
-
-output "test_instance_public_ip" {
-  value = aws_instance.test.public_ip
-}
 
 output "test_security_group_id" {
   value = aws_security_group.test.id
