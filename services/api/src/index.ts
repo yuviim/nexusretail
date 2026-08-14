@@ -21,14 +21,129 @@ app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const products = await prisma.product.findMany({
       where: { tenantId: req.tenantId as string },
-      include: {
+      include: { stockLevels: { include: { warehouse: true } } },
+    });
+    res.json(products);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { sku, name, unitPrice, reorderPoint, warehouseId, initialQuantity } = req.body as {
+      sku: string; name: string; unitPrice: string; reorderPoint: number;
+      warehouseId: string; initialQuantity: number;
+    };
+
+    if (!sku || !name || !unitPrice || !warehouseId) {
+      return res.status(400).json({ error: 'sku, name, unitPrice, and warehouseId are required' });
+    }
+
+    const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+    if (!warehouse || warehouse.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Warehouse not found' });
+    }
+
+    const product = await prisma.product.create({
+      data: {
+        tenantId: req.tenantId as string,
+        sku, name, unitPrice, reorderPoint: reorderPoint ?? 0,
         stockLevels: {
-          include: { warehouse: true },
+          create: [{ warehouseId, quantityOnHand: initialQuantity ?? 0 }],
         },
       },
+      include: { stockLevels: { include: { warehouse: true } } },
     });
 
-    res.json(products);
+    res.status(201).json(product);
+  } catch (err: any) {
+    if (err.code === 'P2002') {
+      return res.status(409).json({ error: 'A product with this SKU already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/products/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const productId = req.params.id as string;
+    const existing = await prisma.product.findUnique({ where: { id: productId } });
+    if (!existing || existing.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const { name, unitPrice, reorderPoint } = req.body;
+    const product = await prisma.product.update({
+      where: { id: productId },
+      data: {
+        ...(name && { name }),
+        ...(unitPrice && { unitPrice }),
+        ...(reorderPoint !== undefined && { reorderPoint }),
+      },
+      include: { stockLevels: { include: { warehouse: true } } },
+    });
+
+    res.json(product);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.patch('/products/:id/stock', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const productId = req.params.id as string;
+    const { warehouseId, quantityOnHand } = req.body as { warehouseId: string; quantityOnHand: number };
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product || product.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const stockLevel = await prisma.stockLevel.upsert({
+      where: { productId_warehouseId: { productId, warehouseId } },
+      update: { quantityOnHand },
+      create: { productId, warehouseId, quantityOnHand },
+    });
+
+    res.json(stockLevel);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/products/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const productId = req.params.id as string;
+    const existing = await prisma.product.findUnique({ where: { id: productId } });
+    if (!existing || existing.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    await prisma.stockLevel.deleteMany({ where: { productId } });
+    await prisma.product.delete({ where: { id: productId } });
+
+    res.status(204).send();
+  } catch (err: any) {
+    if (err.code === 'P2003') {
+      return res.status(409).json({ error: 'Cannot delete a product that has existing orders' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/warehouses', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const warehouses = await prisma.warehouse.findMany({
+      where: { tenantId: req.tenantId as string },
+      orderBy: { name: 'asc' },
+    });
+    res.json(warehouses);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -52,15 +167,9 @@ app.get('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const orders = await prisma.order.findMany({
       where: { tenantId: req.tenantId as string },
-      include: {
-        customer: true,
-        items: {
-          include: { product: true },
-        },
-      },
+      include: { customer: true, items: { include: { product: true } } },
       orderBy: { createdAt: 'desc' },
     });
-
     res.json(orders);
   } catch (err) {
     console.error(err);
@@ -118,12 +227,7 @@ app.get('/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
     const orderId = req.params.id as string;
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: {
-        customer: true,
-        items: {
-          include: { product: true },
-        },
-      },
+      include: { customer: true, items: { include: { product: true } } },
     });
 
     if (!order || order.tenantId !== req.tenantId) {
@@ -152,11 +256,7 @@ app.patch('/orders/:id/status', requireAuth, async (req: AuthenticatedRequest, r
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    const order = await prisma.order.update({
-      where: { id: orderId },
-      data: { status },
-    });
-
+    const order = await prisma.order.update({ where: { id: orderId }, data: { status } });
     res.json(order);
   } catch (err) {
     console.error(err);
@@ -203,14 +303,9 @@ app.post('/team', requireAuth, async (req: AuthenticatedRequest, res) => {
 app.get('/admin/tenants', requireSuperAdmin, async (req, res) => {
   try {
     const tenants = await prisma.tenant.findMany({
-      include: {
-        _count: {
-          select: { users: true, products: true, orders: true },
-        },
-      },
+      include: { _count: { select: { users: true, products: true, orders: true } } },
       orderBy: { createdAt: 'asc' },
     });
-
     res.json(tenants);
   } catch (err) {
     console.error(err);
@@ -231,7 +326,6 @@ app.get('/admin/tenants/:id', requireSuperAdmin, async (req, res) => {
     });
 
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
-
     res.json(tenant);
   } catch (err) {
     console.error(err);

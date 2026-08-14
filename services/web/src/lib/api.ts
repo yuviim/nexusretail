@@ -20,6 +20,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new Error('Session expired');
   }
 
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `Request failed: ${res.status}`);
@@ -41,6 +45,11 @@ export interface Product {
   unitPrice: string;
   reorderPoint: number;
   stockLevels: StockLevel[];
+}
+
+export interface Warehouse {
+  id: string;
+  name: string;
 }
 
 export interface Customer {
@@ -80,6 +89,15 @@ export interface Tenant {
 
 export const api = {
   getProducts: () => request<Product[]>('/products'),
+  createProduct: (data: { sku: string; name: string; unitPrice: string; reorderPoint: number; warehouseId: string; initialQuantity: number }) =>
+    request<Product>('/products', { method: 'POST', body: JSON.stringify(data) }),
+  updateProductStock: (productId: string, warehouseId: string, quantityOnHand: number) =>
+    request<StockLevel>(`/products/${productId}/stock`, {
+      method: 'PATCH',
+      body: JSON.stringify({ warehouseId, quantityOnHand }),
+    }),
+  deleteProduct: (id: string) => request<void>(`/products/${id}`, { method: 'DELETE' }),
+  getWarehouses: () => request<Warehouse[]>('/warehouses'),
   getOrders: () => request<Order[]>('/orders'),
   getOrder: (id: string) => request<Order>(`/orders/${id}`),
   updateOrderStatus: (id: string, status: string) =>
