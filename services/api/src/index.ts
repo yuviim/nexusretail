@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
 app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const products = await prisma.product.findMany({
-      where: { tenantId: req.tenantId },
+      where: { tenantId: req.tenantId as string },
       include: {
         stockLevels: {
           include: { warehouse: true },
@@ -36,7 +36,7 @@ app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
 app.get('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const orders = await prisma.order.findMany({
-      where: { tenantId: req.tenantId },
+      where: { tenantId: req.tenantId as string },
       include: {
         customer: true,
         items: {
@@ -55,8 +55,9 @@ app.get('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
 
 app.get('/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    const orderId = req.params.id as string;
     const order = await prisma.order.findUnique({
-      where: { id: req.params.id },
+      where: { id: orderId },
       include: {
         customer: true,
         items: {
@@ -78,6 +79,7 @@ app.get('/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
 
 app.patch('/orders/:id/status', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    const orderId = req.params.id as string;
     const { status } = req.body;
     const validStatuses = ['placed', 'stock_reserved', 'payment', 'fulfilled'];
 
@@ -85,13 +87,13 @@ app.patch('/orders/:id/status', requireAuth, async (req: AuthenticatedRequest, r
       return res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
     }
 
-    const existing = await prisma.order.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.order.findUnique({ where: { id: orderId } });
     if (!existing || existing.tenantId !== req.tenantId) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
     const order = await prisma.order.update({
-      where: { id: req.params.id },
+      where: { id: orderId },
       data: { status },
     });
 

@@ -61,6 +61,16 @@ resource "aws_ecs_task_definition" "app" {
           protocol      = "tcp"
         }
       ]
+      environment = [
+        {
+          name  = "COGNITO_USER_POOL_ID"
+          value = aws_cognito_user_pool.main.id
+        },
+        {
+          name  = "COGNITO_APP_CLIENT_ID"
+          value = aws_cognito_user_pool_client.app.id
+        }
+      ]
       secrets = [
         {
           name      = "DATABASE_URL"
