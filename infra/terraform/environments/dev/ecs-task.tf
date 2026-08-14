@@ -20,6 +20,21 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Additional policy — lets the execution role read the DATABASE_URL secret
+resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  name = "nexusretail-dev-ecs-secrets-access"
+  role = aws_iam_role.ecs_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = [aws_secretsmanager_secret.database_url.arn]
+    }]
+  })
+}
+
 # CloudWatch Log Group — where your container's stdout/stderr will go
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/ecs/nexusretail-dev-api"
@@ -30,10 +45,10 @@ resource "aws_cloudwatch_log_group" "app" {
 resource "aws_ecs_task_definition" "app" {
   family                   = "nexusretail-dev-api"
   requires_compatibilities = ["FARGATE"]
-  network_mode              = "awsvpc"  # required for Fargate
-  cpu                       = "256"     # 0.25 vCPU
-  memory                    = "512"     # 512 MB
-  execution_role_arn        = aws_iam_role.ecs_execution_role.arn
+  network_mode             = "awsvpc" # required for Fargate
+  cpu                      = "256"    # 0.25 vCPU
+  memory                   = "512"    # 512 MB
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
 
   container_definitions = jsonencode([
     {
@@ -44,6 +59,12 @@ resource "aws_ecs_task_definition" "app" {
         {
           containerPort = 8080
           protocol      = "tcp"
+        }
+      ]
+      secrets = [
+        {
+          name      = "DATABASE_URL"
+          valueFrom = aws_secretsmanager_secret.database_url.arn
         }
       ]
       logConfiguration = {

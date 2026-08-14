@@ -83,3 +83,11 @@ resource "aws_db_instance" "main" {
 output "rds_endpoint" {
   value = aws_db_instance.main.endpoint
 }
+resource "aws_secretsmanager_secret" "database_url" {
+  name = "nexusretail-dev-database-url"
+}
+
+resource "aws_secretsmanager_secret_version" "database_url" {
+  secret_id     = aws_secretsmanager_secret.database_url.id
+  secret_string = "postgresql://${aws_db_instance.main.username}:${random_password.db_password.result}@${aws_db_instance.main.address}:5432/${aws_db_instance.main.db_name}?schema=public"
+}
