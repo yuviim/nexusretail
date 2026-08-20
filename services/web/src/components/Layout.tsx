@@ -1,11 +1,12 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { signOut, getUserEmail, isSuperAdmin } from '../lib/auth';
-import { LayoutGrid, Package, ShoppingCart, Users, ChevronDown, ShieldCheck } from 'lucide-react';
+import { LayoutGrid, Package, ShoppingCart, Users, ChevronDown, ShieldCheck, FileText } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutGrid },
   { to: '/inventory', label: 'Inventory', icon: Package },
   { to: '/orders', label: 'Orders', icon: ShoppingCart },
+  { to: '/purchase-orders', label: 'Purchase Orders', icon: FileText },
   { to: '/team', label: 'Team', icon: Users },
 ];
 

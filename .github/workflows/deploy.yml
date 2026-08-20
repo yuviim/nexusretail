@@ -47,7 +47,6 @@ jobs:
           aws ecs update-service \
             --cluster $ECS_CLUSTER \
             --service $ECS_SERVICE \
-            --task-definition $TASK_DEFINITION:4 \
             --force-new-deployment
 
       - name: Wait for deployment to stabilize

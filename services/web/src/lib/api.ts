@@ -87,6 +87,37 @@ export interface Tenant {
   _count: { users: number; products: number; orders: number };
 }
 
+export interface Supplier {
+  id: string;
+  name: string;
+}
+
+export interface PurchaseOrderItem {
+  id: string;
+  expectedQty: number;
+  expectedUnitPrice: string;
+  product: Product;
+}
+
+export interface LineMatchResult {
+  description: string;
+  extractedQty: number | null;
+  expectedQty: number;
+  extractedUnitPrice: number | null;
+  expectedUnitPrice: number;
+  qtyMatch: boolean;
+  priceMatch: boolean;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  status: string;
+  matchDetails: LineMatchResult[] | null;
+  createdAt: string;
+  supplier: Supplier;
+  items: PurchaseOrderItem[];
+}
+
 export const api = {
   getProducts: () => request<Product[]>('/products'),
   createProduct: (data: { sku: string; name: string; unitPrice: string; reorderPoint: number; warehouseId: string; initialQuantity: number }) =>
@@ -118,4 +149,33 @@ export const api = {
       body: JSON.stringify({ email, name, role }),
     }),
   getTenants: () => request<Tenant[]>('/admin/tenants'),
+  getPurchaseOrders: () => request<PurchaseOrder[]>('/purchase-orders'),
+  getPurchaseOrder: (id: string) => request<PurchaseOrder>(`/purchase-orders/${id}`),
+  approvePurchaseOrder: (id: string) =>
+    request<{ updated: { productId: string; newQuantity: number }[] }>(`/purchase-orders/${id}/approve`, {
+      method: 'POST',
+    }),
+  uploadInvoice: async (file: File) => {
+    const token = getIdToken();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${BASE_URL}/invoices/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+
+    const body = await res.json();
+    if (!res.ok) {
+      throw new Error(body.error || `Request failed: ${res.status}`);
+    }
+    return body as {
+      purchaseOrderId: string;
+      poNumber: string;
+      vendorName: string | null;
+      status: string;
+      lineResults: LineMatchResult[];
+    };
+  },
 };

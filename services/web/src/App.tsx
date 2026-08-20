@@ -7,6 +7,8 @@ import Orders from './pages/Orders';
 import OrderDetail from './pages/OrderDetail';
 import Team from './pages/Team';
 import Admin from './pages/Admin';
+import PurchaseOrders from './pages/PurchaseOrders';
+import PurchaseOrderDetail from './pages/PurchaseOrderDetail';
 import { isAuthenticated } from './lib/auth';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -30,6 +32,8 @@ export default function App() {
           <Route path="/orders" element={<Orders />} />
           <Route path="/orders/:id" element={<OrderDetail />} />
           <Route path="/team" element={<Team />} />
+          <Route path="/purchase-orders" element={<PurchaseOrders />} />
+          <Route path="/purchase-orders/:id" element={<PurchaseOrderDetail />} />
         </Route>
         <Route
           path="/admin"

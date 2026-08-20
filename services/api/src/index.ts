@@ -3,12 +3,17 @@ import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 import { requireAuth, requireSuperAdmin, AuthenticatedRequest } from './middleware/auth';
+import multer from 'multer';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 dotenv.config();
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 8080;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-central-1' });
+const INVOICES_BUCKET = 'nexusretail-dev-invoices-102268067799';
 
 app.use(cors());
 app.use(express.json());
@@ -330,6 +335,93 @@ app.get('/admin/tenants/:id', requireSuperAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/purchase-orders', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const pos = await prisma.purchaseOrder.findMany({
+      where: { tenantId: req.tenantId as string },
+      include: { supplier: true, items: { include: { product: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(pos);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/purchase-orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: req.params.id as string },
+      include: { supplier: true, items: { include: { product: true } } },
+    });
+
+    if (!po || po.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Purchase order not found' });
+    }
+
+    res.json(po);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/purchase-orders/:id/approve', requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { updateStock } = await import('./agents/tools/updateStock');
+    const result = await updateStock(req.tenantId as string, req.params.id as string);
+    res.json(result);
+  } catch (err: any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || 'Failed to approve purchase order' });
+  }
+});
+
+app.post('/invoices/upload', requireAuth, upload.single('file'), async (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { extractInvoice } = await import('./agents/tools/extractInvoice');
+    const { findPurchaseOrderByNumber } = await import('./agents/tools/findPurchaseOrderByNumber');
+    const { matchPurchaseOrder } = await import('./agents/tools/matchPurchaseOrder');
+
+    const s3Key = `uploads/${Date.now()}-${req.file.originalname}`;
+
+    await s3.send(new PutObjectCommand({
+      Bucket: INVOICES_BUCKET,
+      Key: s3Key,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype,
+    }));
+
+    const invoice = await extractInvoice(INVOICES_BUCKET, s3Key);
+
+    if (!invoice.poNumber) {
+      return res.status(422).json({
+        error: 'No PO number found on this invoice. Unable to automatically match it to a purchase order.',
+        invoice,
+      });
+    }
+
+    const po = await findPurchaseOrderByNumber(req.tenantId as string, invoice.poNumber);
+    const result = await matchPurchaseOrder(req.tenantId as string, po.id, invoice);
+
+    res.json({
+      purchaseOrderId: po.id,
+      poNumber: invoice.poNumber,
+      vendorName: invoice.vendorName,
+      status: result.status,
+      lineResults: result.lineResults,
+    });
+  } catch (err: any) {
+    console.error(err);
+    res.status(400).json({ error: err.message || 'Failed to process invoice' });
   }
 });
 

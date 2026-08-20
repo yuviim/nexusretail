@@ -1,11 +1,10 @@
 # Look up the current Amazon Linux 2023 AMI dynamically
 data "aws_ami" "amazon_linux" {
-  most_recent = true
-  owners      = ["amazon"]
+  owners = ["amazon"]
 
   filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    name   = "image-id"
+    values = ["ami-0ae7d073c75a47c24"]
   }
 
   filter {

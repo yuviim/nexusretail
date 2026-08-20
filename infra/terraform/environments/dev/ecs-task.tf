@@ -35,6 +35,28 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
   })
 }
 
+# Task role — this is the identity your APPLICATION CODE runs as at runtime.
+# Distinct from the execution role above, which ECS itself uses to pull
+# images and write logs. Any AWS SDK call your Node.js code makes
+# (Textract, S3, Bedrock, etc.) authenticates as THIS role, not the
+# execution role.
+resource "aws_iam_role" "ecs_task_role" {
+  name = "nexusretail-dev-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+    }]
+  })
+
+  tags = {
+    Name = "nexusretail-dev-ecs-task-role"
+  }
+}
+
 # CloudWatch Log Group — where your container's stdout/stderr will go
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/ecs/nexusretail-dev-api"
@@ -49,6 +71,7 @@ resource "aws_ecs_task_definition" "app" {
   cpu                      = "256"    # 0.25 vCPU
   memory                   = "512"    # 512 MB
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  task_role_arn             = aws_iam_role.ecs_task_role.arn
 
   container_definitions = jsonencode([
     {
