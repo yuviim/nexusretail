@@ -178,4 +178,4 @@ export const api = {
       lineResults: LineMatchResult[];
     };
   },
-};
+};// Deployed via automated CI/CD pipeline
