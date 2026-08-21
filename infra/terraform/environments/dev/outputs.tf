@@ -17,3 +17,7 @@ output "private_subnet_1a_id" {
 output "private_subnet_1b_id" {
   value = aws_subnet.private_1b.id
 }
+
+output "waf_web_acl_arn" {
+  value = aws_wafv2_web_acl.main.arn
+}
