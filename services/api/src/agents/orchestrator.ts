@@ -8,8 +8,8 @@ import {
   import { matchPurchaseOrder } from './tools/matchPurchaseOrder';
   import { updateStock } from './tools/updateStock';
   
-  const bedrock = new BedrockRuntimeClient({ region: 'us-east-1' });
-  const MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
+  const bedrock = new BedrockRuntimeClient({ region: 'eu-central-1' });
+  const MODEL_ID = 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0';
 
   const tools: Tool[] = [
     {

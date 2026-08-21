@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NexusRetail — Invoices matched. Inventory accounted for.</title>
+<meta name="description" content="NexusRetail reconciles supplier invoices against purchase orders automatically, then updates your stock levels — built on AWS with Textract, ECS Fargate, and multi-tenant Postgres.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark">N</span>
+      <span class="brand-name">NexusRetail</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#modules">Modules</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#manifest">Live manifest</a>
+    </nav>
+    <div class="nav-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch between light and dark theme">
+        <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+        <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z"/></svg>
+      </button>
+      <a class="btn btn-primary" href="https://app.nexusretail.yuvarajai.com" target="_blank" rel="noopener">See it live</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero" id="top">
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow">Multi-tenant inventory &amp; order management</p>
+        <h1>Every invoice, matched.<br>Every unit, accounted for.</h1>
+        <p class="hero-sub">NexusRetail reads a supplier invoice, finds the purchase order it belongs to, and checks every line item against what you actually ordered — then updates your stock levels itself. No spreadsheet, no manual lookup.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="https://app.nexusretail.yuvarajai.com" target="_blank" rel="noopener">See it live →</a>
+          <a class="btn btn-ghost btn-lg" href="#architecture">View the architecture</a>
+        </div>
+      </div>
+
+      <div class="hero-visual" aria-hidden="true">
+        <div class="manifest-card">
+          <div class="manifest-card-head">
+            <span class="tag tag-mono">PO-1001</span>
+            <span class="status-pill status-matched">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10.5l3.5 3.5L16 6"/></svg>
+              Matched
+            </span>
+          </div>
+          <p class="manifest-supplier">TechVision Distributors Pvt Ltd</p>
+          <p class="manifest-note">Automatically matched — invoice line items reconciled against purchase order</p>
+          <div class="manifest-rows">
+            <div class="manifest-row">
+              <span>Extracted via Textract</span>
+              <span class="mono">2.1s</span>
+            </div>
+            <div class="manifest-row">
+              <span>Line items compared</span>
+              <span class="mono">1 / 1</span>
+            </div>
+            <div class="manifest-row">
+              <span>Stock levels updated</span>
+              <span class="mono status-ok">✓ eu-central-1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="manifest-strip" id="manifest" aria-label="Live system activity, example log">
+    <div class="manifest-strip-label">
+      <span class="dot" aria-hidden="true"></span>
+      Live manifest
+    </div>
+    <div class="ticker-viewport">
+      <div class="ticker-track" id="ticker-track">
+        <!-- content duplicated via JS for seamless loop -->
+      </div>
+    </div>
+  </section>
+
+  <section class="modules" id="modules">
+    <div class="section-inner">
+      <p class="eyebrow">What it actually does</p>
+      <h2>Four modules, one reconciliation loop</h2>
+
+      <div class="module-grid">
+        <article class="module-card">
+          <p class="module-tag">Ingestion</p>
+          <h3>Automatic PO matching</h3>
+          <p>Amazon Textract extracts vendor, PO number, and line items from any invoice PDF. NexusRetail finds the matching purchase order on its own — no manual selection required.</p>
+        </article>
+
+        <article class="module-card">
+          <p class="module-tag">Human-in-the-loop</p>
+          <h3>Review, when it matters</h3>
+          <p>A confident match updates stock immediately. An uncertain one routes to a review screen instead of failing silently or guessing — someone approves it, or flags it, before anything changes.</p>
+        </article>
+
+        <article class="module-card">
+          <p class="module-tag">Data isolation</p>
+          <h3>Multi-tenant by design</h3>
+          <p>Every tenant's inventory, suppliers, and orders stay isolated at the data layer, not bolted on with a filter in the application code.</p>
+        </article>
+
+        <article class="module-card">
+          <p class="module-tag">Operations</p>
+          <h3>Built to withstand real traffic</h3>
+          <p>WAF, per-IP rate limiting, and CloudWatch alarms run from day one — verified against a live blocked request, not assumed to work.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="architecture" id="architecture">
+    <div class="section-inner">
+      <p class="eyebrow">Under the hood</p>
+      <h2>Built on AWS, not around it</h2>
+      <p class="architecture-sub">Every piece below is deployed, monitored, and actually running — not a diagram of intent.</p>
+
+      <div class="tag-grid" role="list">
+        <span class="infra-tag" role="listitem">ECS Fargate</span>
+        <span class="infra-tag" role="listitem">RDS Postgres</span>
+        <span class="infra-tag" role="listitem">Cognito</span>
+        <span class="infra-tag" role="listitem">Textract</span>
+        <span class="infra-tag" role="listitem">CloudFront + S3</span>
+        <span class="infra-tag" role="listitem">CloudWatch</span>
+        <span class="infra-tag" role="listitem">AWS WAF</span>
+        <span class="infra-tag" role="listitem">Terraform</span>
+        <span class="infra-tag" role="listitem">GitHub Actions</span>
+        <span class="infra-tag" role="listitem">Bedrock</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band">
+    <div class="section-inner cta-inner">
+      <h2>Watch the whole pipeline run</h2>
+      <p>Upload an invoice, watch it get matched, and see stock update in real time.</p>
+      <a class="btn btn-primary btn-lg" href="https://app.nexusretail.yuvarajai.com" target="_blank" rel="noopener">Open the live app →</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="brand brand-footer">
+      <span class="brand-mark">N</span>
+      <span class="brand-name">NexusRetail</span>
+    </div>
+    <div class="footer-links">
+      <a href="https://app.nexusretail.yuvarajai.com" target="_blank" rel="noopener">Live app</a>
+      <a href="#" id="footer-github">GitHub</a>
+      <a href="#" id="footer-linkedin">LinkedIn</a>
+    </div>
+    <p class="footer-note">Built as a working demonstration of production AWS architecture.</p>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
