@@ -32,14 +32,19 @@ resource "aws_wafv2_web_acl" "main" {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
 
-        # Exclude the size-restriction rule if it interferes with multipart
-        # invoice file uploads. Uncomment if you see false positives there.
-        # rule_action_override {
-        #   action_to_use {
-        #     count {}
-        #   }
-        #   name = "SizeRestrictions_BODY"
-        # }
+        # SizeRestrictions_BODY was blocking real invoice uploads (~86KB
+        # multipart bodies) — confirmed via WAF sampled requests on
+        # 2026-08-23, RuleNameWithinRuleGroup:
+        # "AWS#AWSManagedRulesCommonRuleSet#SizeRestrictions_BODY".
+        # This is a false positive on legitimate traffic, not a real
+        # attack signature, so it's excluded to count-only while every
+        # other CRS rule stays fully enforced.
+        rule_action_override {
+          action_to_use {
+            count {}
+          }
+          name = "SizeRestrictions_BODY"
+        }
       }
     }
 

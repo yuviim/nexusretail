@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { requireAuth, requireSuperAdmin, AuthenticatedRequest } from './middleware/auth';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import morgan from 'morgan';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-central-1' });
 const INVOICES_BUCKET = 'nexusretail-dev-invoices-102268067799';
 
 app.use(cors());
+app.use(morgan('combined'));
 app.use(express.json());
 
 app.get('/', (req, res) => {
@@ -392,6 +394,7 @@ app.post('/invoices/upload', requireAuth, upload.single('file'), async (req: Aut
     const { matchPurchaseOrder } = await import('./agents/tools/matchPurchaseOrder');
 
     const s3Key = `uploads/${Date.now()}-${req.file.originalname}`;
+    console.log(`[invoice-upload] received file "${req.file.originalname}" (${req.file.size} bytes), tenant=${req.tenantId}`);
 
     await s3.send(new PutObjectCommand({
       Bucket: INVOICES_BUCKET,
@@ -399,10 +402,13 @@ app.post('/invoices/upload', requireAuth, upload.single('file'), async (req: Aut
       Body: req.file.buffer,
       ContentType: req.file.mimetype,
     }));
+    console.log(`[invoice-upload] stored in S3 at s3://${INVOICES_BUCKET}/${s3Key}`);
 
     const invoice = await extractInvoice(INVOICES_BUCKET, s3Key);
+    console.log(`[invoice-upload] Textract extraction complete: vendor="${invoice.vendorName}", poNumber="${invoice.poNumber || 'NOT FOUND'}"`);
 
     if (!invoice.poNumber) {
+      console.log(`[invoice-upload] no PO number extracted — stopping, no automatic match attempted`);
       return res.status(422).json({
         error: 'No PO number found on this invoice. Unable to automatically match it to a purchase order.',
         invoice,
@@ -410,7 +416,9 @@ app.post('/invoices/upload', requireAuth, upload.single('file'), async (req: Aut
     }
 
     const po = await findPurchaseOrderByNumber(req.tenantId as string, invoice.poNumber);
+    console.log(`[invoice-upload] found matching PO: ${po.id} (${invoice.poNumber})`);
     const result = await matchPurchaseOrder(req.tenantId as string, po.id, invoice);
+    console.log(`[invoice-upload] match result: status="${result.status}" for PO ${po.id}`);
 
     res.json({
       purchaseOrderId: po.id,
