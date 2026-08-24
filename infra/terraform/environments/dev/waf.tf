@@ -45,6 +45,18 @@ resource "aws_wafv2_web_acl" "main" {
           }
           name = "SizeRestrictions_BODY"
         }
+        # CrossSiteScripting_BODY false-positived on a legitimate PDF
+        # invoice upload — confirmed via WAF sampled requests on
+        # 2026-08-24, RuleNameWithinRuleGroup:
+        # "AWS#AWSManagedRulesCommonRuleSet#CrossSiteScripting_BODY".
+        # PDF binary content can trip signature-based XSS detection on
+        # body inspection; excluded to count-only, same as the size rule.
+        rule_action_override {
+          action_to_use {
+            count {}
+          }
+          name = "CrossSiteScripting_BODY"
+        }
       }
     }
 
