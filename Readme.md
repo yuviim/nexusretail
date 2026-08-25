@@ -12,7 +12,7 @@ I also used this project as my hands-on companion while studying for the AWS Sol
 
 **Full architecture walkthrough (video):** https://youtu.be/K_kagA2orUU
 
-**Region:** eu-central-1 (Frankfurt)**
+**Region:** eu-central-1 (Frankfurt)
 
 ---
 
