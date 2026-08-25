@@ -6,11 +6,11 @@ NexusRetail is a multi-tenant inventory and order management platform with a ful
 
 I also used this project as my hands-on companion while studying for the AWS Solutions Architect Associate exam — most of the domains show up somewhere in this build, not as abstract concepts but as things I actually had to configure, break, and fix.
 
-**Live app:** https://app.nexusretail.yuvarajai.com**
+**Live app:** https://app.nexusretail.yuvarajai.com
 
-**Landing page:** https://www.nexusretail.yuvarajai.com**
+**Landing page:** https://www.nexusretail.yuvarajai.com
 
-**Full architecture walkthrough (video):** https://youtu.be/K_kagA2orUU**
+**Full architecture walkthrough (video):** https://youtu.be/K_kagA2orUU
 
 **Region:** eu-central-1 (Frankfurt)**
 
