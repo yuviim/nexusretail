@@ -1,25 +1,16 @@
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../../prisma';
 import type { ExtractedInvoice, ExtractedLineItem } from './extractInvoice';
+import { computeLineMatches, isFullMatch, type LineMatchResult, type PoItemForMatching } from './matchLogic';
 
-const prisma = new PrismaClient();
+export type { LineMatchResult, PoItemForMatching };
 
 export interface MatchResult {
   purchaseOrderId: string;
   status: 'matched' | 'flagged';
   lineResults: LineMatchResult[];
+  extraLineItems: ExtractedLineItem[];
+  invoiceTotalMatch: boolean | null;
 }
-
-export interface LineMatchResult {
-  description: string;
-  extractedQty: number | null;
-  expectedQty: number;
-  extractedUnitPrice: number | null;
-  expectedUnitPrice: number;
-  qtyMatch: boolean;
-  priceMatch: boolean;
-}
-
-const PRICE_TOLERANCE = 0.01; // allow tiny rounding differences
 
 export async function matchPurchaseOrder(
   tenantId: string,
@@ -35,47 +26,20 @@ export async function matchPurchaseOrder(
     throw new Error('Purchase order not found for this tenant');
   }
 
-  const lineResults: LineMatchResult[] = po.items.map((poItem) => {
-    const extracted = findBestMatch(poItem.product.name, invoice.lineItems);
-    const expectedUnitPrice = Number(poItem.expectedUnitPrice);
+  const poItems: PoItemForMatching[] = po.items.map((poItem) => ({
+    productId: poItem.productId,
+    productName: poItem.product.name,
+    expectedQty: poItem.expectedQty,
+    expectedUnitPrice: Number(poItem.expectedUnitPrice),
+  }));
 
-    const qtyMatch = extracted?.quantity === poItem.expectedQty;
-    const priceMatch =
-      extracted?.unitPrice != null &&
-      Math.abs(extracted.unitPrice - expectedUnitPrice) <= PRICE_TOLERANCE;
-
-    return {
-      description: poItem.product.name,
-      extractedQty: extracted?.quantity ?? null,
-      expectedQty: poItem.expectedQty,
-      extractedUnitPrice: extracted?.unitPrice ?? null,
-      expectedUnitPrice,
-      qtyMatch,
-      priceMatch,
-    };
-  });
-
-  const allMatch = lineResults.every((r) => r.qtyMatch && r.priceMatch);
-  const status = allMatch ? 'matched' : 'flagged';
+  const { lineResults, extraLineItems, invoiceTotalMatch } = computeLineMatches(poItems, invoice);
+  const status = isFullMatch(lineResults, extraLineItems, invoiceTotalMatch) ? 'matched' : 'flagged';
 
   await prisma.purchaseOrder.update({
     where: { id: purchaseOrderId },
-    data: { status, matchDetails: lineResults as any },
+    data: { status, matchDetails: { lineResults, extraLineItems, invoiceTotalMatch } as any },
   });
 
-  return { purchaseOrderId, status, lineResults };
-}
-
-// Very simple fuzzy matcher — matches on substring overlap since
-// Textract's OCR text won't be byte-identical to the product name in RDS.
-function findBestMatch(productName: string, lineItems: ExtractedLineItem[]): ExtractedLineItem | null {
-  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const target = normalize(productName);
-
-  return (
-    lineItems.find((item) => {
-      const desc = normalize(item.description);
-      return desc.includes(target) || target.includes(desc);
-    }) ?? null
-  );
+  return { purchaseOrderId, status, lineResults, extraLineItems, invoiceTotalMatch };
 }

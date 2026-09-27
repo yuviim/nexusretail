@@ -64,8 +64,14 @@ resource "aws_db_instance" "main" {
 
   multi_az             = false
   publicly_accessible  = false
-  skip_final_snapshot  = true
 
+  # Deliberate for a dev/portfolio environment, not an oversight: this
+  # database gets torn down and reseeded regularly, and a final snapshot or
+  # a real backup window just adds cost and teardown latency for data that
+  # isn't meant to survive anyway. A prod environment for this same app
+  # would flip both: skip_final_snapshot = false and a real
+  # backup_retention_period (7+ days), plus multi_az = true.
+  skip_final_snapshot     = true
   backup_retention_period = 1
 
   tags = {

@@ -4,6 +4,19 @@ resource "aws_cognito_user_pool" "main" {
   username_attributes     = ["email"]
   auto_verified_attributes = ["email"]
 
+  # Closed off self-signup deliberately. Cognito's SignUp API is public by
+  # definition (the app client ID ships in the frontend bundle), and this
+  # user pool has a custom:tenant_id attribute that decides which tenant's
+  # data a user can see. Leaving self-signup open meant anyone could call
+  # SignUp, set custom:tenant_id to any UUID they could get their hands on,
+  # and read that tenant's data. Users are provisioned by an admin via
+  # AdminCreateUser instead, which is the only path that also creates the
+  # matching row in our own `users` table — see auth.ts for why the API
+  # doesn't trust this claim anymore either.
+  admin_create_user_config {
+    allow_admin_create_user_only = true
+  }
+
   password_policy {
     minimum_length    = 8
     require_lowercase = true
@@ -41,6 +54,12 @@ resource "aws_cognito_user_pool_client" "app" {
 
   # No client secret — appropriate for a public-facing app client (frontend/CLI use)
   generate_secret = false
+
+  # Belt-and-suspenders on top of disabling self-signup: even an
+  # authenticated user calling UpdateUserAttributes can't touch
+  # custom:tenant_id from this client. Every other standard attribute is
+  # still writable so profile edits keep working.
+  write_attributes = ["email", "name", "family_name", "given_name"]
 }
 
 output "cognito_user_pool_id" {

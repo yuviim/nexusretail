@@ -1,8 +1,9 @@
 import express from 'express';
 import cors from 'cors';
-import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
-import { requireAuth, requireSuperAdmin, AuthenticatedRequest } from './middleware/auth';
+import crypto from 'crypto';
+import { prisma } from './prisma';
+import { requireAuth, requireSuperAdmin, requireRole, AuthenticatedRequest } from './middleware/auth';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import morgan from 'morgan';
@@ -10,13 +11,17 @@ import morgan from 'morgan';
 dotenv.config();
 
 const app = express();
-const prisma = new PrismaClient();
 const PORT = process.env.PORT || 8080;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-central-1' });
-const INVOICES_BUCKET = 'nexusretail-dev-invoices-102268067799';
+const INVOICES_BUCKET = process.env.INVOICES_BUCKET || 'nexusretail-dev-invoices-102268067799';
 
-app.use(cors());
+// cors() with no options reflects whatever Origin header shows up, which is
+// the same as allowing every origin. ALLOWED_ORIGIN is set per environment
+// (the CloudFront app domain in dev/prod); falls back to the known dev
+// frontend so this doesn't silently open up if the env var is missing.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://app.nexusretail.yuvarajai.com';
+app.use(cors({ origin: ALLOWED_ORIGIN }));
 app.use(morgan('combined'));
 app.use(express.json());
 
@@ -37,7 +42,7 @@ app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.post('/products', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
     const { sku, name, unitPrice, reorderPoint, warehouseId, initialQuantity } = req.body as {
       sku: string; name: string; unitPrice: string; reorderPoint: number;
@@ -74,7 +79,7 @@ app.post('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.patch('/products/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.patch('/products/:id', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
     const productId = req.params.id as string;
     const existing = await prisma.product.findUnique({ where: { id: productId } });
@@ -100,7 +105,7 @@ app.patch('/products/:id', requireAuth, async (req: AuthenticatedRequest, res) =
   }
 });
 
-app.patch('/products/:id/stock', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.patch('/products/:id/stock', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
     const productId = req.params.id as string;
     const { warehouseId, quantityOnHand } = req.body as { warehouseId: string; quantityOnHand: number };
@@ -108,6 +113,14 @@ app.patch('/products/:id/stock', requireAuth, async (req: AuthenticatedRequest, 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product || product.tenantId !== req.tenantId) {
       return res.status(404).json({ error: 'Product not found' });
+    }
+
+    // warehouseId comes straight from the request body — without this check
+    // a caller could write stock rows against another tenant's warehouse
+    // just by guessing or enumerating warehouse UUIDs.
+    const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+    if (!warehouse || warehouse.tenantId !== req.tenantId) {
+      return res.status(404).json({ error: 'Warehouse not found' });
     }
 
     const stockLevel = await prisma.stockLevel.upsert({
@@ -123,7 +136,7 @@ app.patch('/products/:id/stock', requireAuth, async (req: AuthenticatedRequest, 
   }
 });
 
-app.delete('/products/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.delete('/products/:id', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
     const productId = req.params.id as string;
     const existing = await prisma.product.findUnique({ where: { id: productId } });
@@ -184,7 +197,7 @@ app.get('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.post('/orders', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
     const { customerId, items } = req.body as {
       customerId: string;
@@ -248,7 +261,7 @@ app.get('/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.patch('/orders/:id/status', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.patch('/orders/:id/status', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
     const orderId = req.params.id as string;
     const { status } = req.body;
@@ -284,7 +297,7 @@ app.get('/team', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post('/team', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.post('/team', requireAuth, requireRole('owner'), async (req: AuthenticatedRequest, res) => {
   try {
     const { email, name, role } = req.body as { email: string; name: string; role: string };
     const validRoles = ['owner', 'staff', 'read_only'];
@@ -372,10 +385,11 @@ app.get('/purchase-orders/:id', requireAuth, async (req: AuthenticatedRequest, r
   }
 });
 
-app.post('/purchase-orders/:id/approve', requireAuth, async (req: AuthenticatedRequest, res) => {
+app.post('/purchase-orders/:id/approve', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
   try {
+    const { warehouseId } = req.body as { warehouseId?: string };
     const { updateStock } = await import('./agents/tools/updateStock');
-    const result = await updateStock(req.tenantId as string, req.params.id as string);
+    const result = await updateStock(req.tenantId as string, req.params.id as string, warehouseId);
     res.json(result);
   } catch (err: any) {
     console.error(err);
@@ -383,55 +397,87 @@ app.post('/purchase-orders/:id/approve', requireAuth, async (req: AuthenticatedR
   }
 });
 
-app.post('/invoices/upload', requireAuth, upload.single('file'), async (req: AuthenticatedRequest, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+app.post(
+  '/invoices/upload',
+  requireAuth,
+  requireRole('owner', 'staff'),
+  upload.single('file'),
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
 
-    const { extractInvoice } = await import('./agents/tools/extractInvoice');
-    const { findPurchaseOrderByNumber } = await import('./agents/tools/findPurchaseOrderByNumber');
-    const { matchPurchaseOrder } = await import('./agents/tools/matchPurchaseOrder');
+      const { extractInvoice } = await import('./agents/tools/extractInvoice');
+      const { findPurchaseOrderByNumber } = await import('./agents/tools/findPurchaseOrderByNumber');
+      const { matchPurchaseOrder } = await import('./agents/tools/matchPurchaseOrder');
 
-    const s3Key = `uploads/${Date.now()}-${req.file.originalname}`;
-    console.log(`[invoice-upload] received file "${req.file.originalname}" (${req.file.size} bytes), tenant=${req.tenantId}`);
+      const tenantId = req.tenantId as string;
 
-    await s3.send(new PutObjectCommand({
-      Bucket: INVOICES_BUCKET,
-      Key: s3Key,
-      Body: req.file.buffer,
-      ContentType: req.file.mimetype,
-    }));
-    console.log(`[invoice-upload] stored in S3 at s3://${INVOICES_BUCKET}/${s3Key}`);
-
-    const invoice = await extractInvoice(INVOICES_BUCKET, s3Key);
-    console.log(`[invoice-upload] Textract extraction complete: vendor="${invoice.vendorName}", poNumber="${invoice.poNumber || 'NOT FOUND'}"`);
-
-    if (!invoice.poNumber) {
-      console.log(`[invoice-upload] no PO number extracted — stopping, no automatic match attempted`);
-      return res.status(422).json({
-        error: 'No PO number found on this invoice. Unable to automatically match it to a purchase order.',
-        invoice,
+      // Same invoice re-uploaded twice used to just re-run the match with no
+      // memory of the first attempt. Hash the raw bytes and reject a repeat
+      // before we spend a Textract call on it, let alone re-touch stock.
+      const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+      const alreadyProcessed = await prisma.processedInvoice.findUnique({
+        where: { tenantId_fileHash: { tenantId, fileHash } },
       });
+      if (alreadyProcessed) {
+        return res.status(409).json({
+          error: 'This exact invoice file has already been uploaded for this tenant.',
+          purchaseOrderId: alreadyProcessed.purchaseOrderId,
+        });
+      }
+
+      // Tenant-prefixed, content-addressed key instead of
+      // `uploads/{timestamp}-{originalname}`: the old key had no tenant
+      // boundary in the object path and forwarded the caller's filename
+      // (unsanitized) straight into S3.
+      const s3Key = `invoices/${tenantId}/${crypto.randomUUID()}.pdf`;
+      console.log(`[invoice-upload] received file "${req.file.originalname}" (${req.file.size} bytes), tenant=${tenantId}`);
+
+      await s3.send(new PutObjectCommand({
+        Bucket: INVOICES_BUCKET,
+        Key: s3Key,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype,
+      }));
+      console.log(`[invoice-upload] stored in S3 at s3://${INVOICES_BUCKET}/${s3Key}`);
+
+      const invoice = await extractInvoice(INVOICES_BUCKET, s3Key);
+      console.log(`[invoice-upload] Textract extraction complete: vendor="${invoice.vendorName}", poNumber="${invoice.poNumber || 'NOT FOUND'}"`);
+
+      if (!invoice.poNumber) {
+        console.log(`[invoice-upload] no PO number extracted — stopping, no automatic match attempted`);
+        return res.status(422).json({
+          error: 'No PO number found on this invoice. Unable to automatically match it to a purchase order.',
+          invoice,
+        });
+      }
+
+      const po = await findPurchaseOrderByNumber(tenantId, invoice.poNumber);
+      console.log(`[invoice-upload] found matching PO: ${po.id} (${invoice.poNumber})`);
+      const result = await matchPurchaseOrder(tenantId, po.id, invoice);
+      console.log(`[invoice-upload] match result: status="${result.status}" for PO ${po.id}`);
+
+      await prisma.processedInvoice.create({
+        data: { tenantId, fileHash, purchaseOrderId: po.id },
+      });
+
+      res.json({
+        purchaseOrderId: po.id,
+        poNumber: invoice.poNumber,
+        vendorName: invoice.vendorName,
+        status: result.status,
+        lineResults: result.lineResults,
+        extraLineItems: result.extraLineItems,
+        invoiceTotalMatch: result.invoiceTotalMatch,
+      });
+    } catch (err: any) {
+      console.error(err);
+      res.status(400).json({ error: err.message || 'Failed to process invoice' });
     }
-
-    const po = await findPurchaseOrderByNumber(req.tenantId as string, invoice.poNumber);
-    console.log(`[invoice-upload] found matching PO: ${po.id} (${invoice.poNumber})`);
-    const result = await matchPurchaseOrder(req.tenantId as string, po.id, invoice);
-    console.log(`[invoice-upload] match result: status="${result.status}" for PO ${po.id}`);
-
-    res.json({
-      purchaseOrderId: po.id,
-      poNumber: invoice.poNumber,
-      vendorName: invoice.vendorName,
-      status: result.status,
-      lineResults: result.lineResults,
-    });
-  } catch (err: any) {
-    console.error(err);
-    res.status(400).json({ error: err.message || 'Failed to process invoice' });
   }
-});
+);
 
 app.listen(PORT, () => {
   console.log(`NexusRetail API listening on port ${PORT}`);

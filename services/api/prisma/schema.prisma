@@ -19,6 +19,7 @@ model Tenant {
   orders     Order[]
   suppliers  Supplier[]
   purchaseOrders PurchaseOrder[]
+  processedInvoices ProcessedInvoice[]
 
   @@map("tenants")
 }
@@ -44,6 +45,7 @@ model Warehouse {
   name String
 
   stockLevels StockLevel[]
+  purchaseOrders PurchaseOrder[]
 
   @@map("warehouses")
 }
@@ -145,8 +147,33 @@ model PurchaseOrder {
   createdAt    DateTime @default(now())
   items        PurchaseOrderItem[]
 
+  // Which warehouse receives the stock on approval. Nullable because
+  // existing POs predate this column; approve() requires it be set (either
+  // already, or passed in on the approve call) before it will touch stock —
+  // it no longer guesses by taking stockLevels[0].
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  processedInvoices ProcessedInvoice[]
+
   @@unique([tenantId, poNumber])
   @@map("purchase_orders")
+}
+
+// One row per invoice file we've actually processed for a tenant, keyed by
+// a hash of the file bytes. Re-uploading the identical file is rejected
+// before it reaches Textract or touches a PO a second time.
+model ProcessedInvoice {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  fileHash        String
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+  createdAt       DateTime      @default(now())
+
+  @@unique([tenantId, fileHash])
+  @@map("processed_invoices")
 }
 
 model PurchaseOrderItem {
