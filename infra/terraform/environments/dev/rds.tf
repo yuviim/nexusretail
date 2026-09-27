@@ -27,13 +27,31 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# Auto-generated DB password
-resource "random_password" "db_password" {
-  length  = 24
-  special = false
+# The DB password used to be generated fresh by `random_password` on every
+# apply that didn't already have it in state. That's exactly what bit us
+# after a state-loss incident: state forgets the old value, a fresh apply
+# generates a new one and tries to push it onto the live instance and the
+# stored secret, desyncing both from every client that already has the old
+# credential cached. Reading the CURRENT value back out of Secrets Manager
+# instead makes this idempotent — Terraform stops being able to invent a
+# password out of thin air, and can only ever reflect what's actually
+# there. Rotate deliberately (update the secret, then ModifyDBInstance),
+# not as a side effect of recovering from an unrelated apply.
+data "aws_secretsmanager_secret" "db_credentials" {
+  name = "nexusretail-dev-db-credentials"
 }
 
-# Store credentials in Secrets Manager
+data "aws_secretsmanager_secret_version" "db_credentials" {
+  secret_id = data.aws_secretsmanager_secret.db_credentials.id
+}
+
+locals {
+  db_password = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string).password
+}
+
+# Container for the credentials — still Terraform-managed for lifecycle
+# purposes, but its value now comes from local.db_password above, not from
+# a resource Terraform can regenerate on its own.
 resource "aws_secretsmanager_secret" "db_credentials" {
   name = "nexusretail-dev-db-credentials"
 }
@@ -42,8 +60,12 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
   secret_id = aws_secretsmanager_secret.db_credentials.id
   secret_string = jsonencode({
     username = "nexusretail_admin"
-    password = random_password.db_password.result
+    password = local.db_password
   })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 # The RDS instance itself
@@ -57,7 +79,7 @@ resource "aws_db_instance" "main" {
 
   db_name  = "nexusretail"
   username = "nexusretail_admin"
-  password = random_password.db_password.result
+  password = local.db_password
 
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
@@ -101,5 +123,9 @@ resource "aws_secretsmanager_secret" "database_url" {
 
 resource "aws_secretsmanager_secret_version" "database_url" {
   secret_id     = aws_secretsmanager_secret.database_url.id
-  secret_string = "postgresql://${aws_db_instance.main.username}:${random_password.db_password.result}@${aws_db_instance.main.address}:5432/${aws_db_instance.main.db_name}?schema=public"
+  secret_string = "postgresql://${aws_db_instance.main.username}:${local.db_password}@${aws_db_instance.main.address}:5432/${aws_db_instance.main.db_name}?schema=public"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
