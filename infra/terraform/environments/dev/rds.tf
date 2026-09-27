@@ -65,6 +65,19 @@ resource "aws_db_instance" "main" {
   multi_az             = false
   publicly_accessible  = false
 
+  # After a state-loss incident, random_password.db_password can't be
+  # re-imported (the random provider has no external system to import that
+  # value back from), so a fresh apply would generate a brand new password
+  # and try to push it onto this already-running instance — desyncing it
+  # from every already-connected client and cached secret. Ignoring changes
+  # to password here means Terraform stops trying to manage this instance's
+  # credential after initial creation; rotate it deliberately (through
+  # Secrets Manager + a manual ModifyDBInstance call) if you ever need to,
+  # not as an incidental side effect of an unrelated apply.
+  lifecycle {
+    ignore_changes = [password]
+  }
+
   # Deliberate for a dev/portfolio environment, not an oversight: this
   # database gets torn down and reseeded regularly, and a final snapshot or
   # a real backup window just adds cost and teardown latency for data that
