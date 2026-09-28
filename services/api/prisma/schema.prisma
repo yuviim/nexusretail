@@ -44,6 +44,7 @@ model User {
   role       String   @default("staff") // owner | staff | read_only
   createdAt  DateTime @default(now())
 
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -57,6 +58,7 @@ model Warehouse {
   stockLevels StockLevel[]
   purchaseOrders PurchaseOrder[]
 
+  @@index([tenantId])
   @@map("warehouses")
 }
 
@@ -89,6 +91,7 @@ model StockLevel {
   quantityOnHand Int @default(0)
 
   @@unique([productId, warehouseId])
+  @@index([warehouseId])
   @@map("stock_levels")
 }
 
@@ -101,6 +104,7 @@ model Customer {
 
   orders Order[]
 
+  @@index([tenantId])
   @@map("customers")
 }
 
@@ -117,6 +121,7 @@ model Order {
 
   items OrderItem[]
 
+  @@index([tenantId])
   @@map("orders")
 }
 
@@ -131,6 +136,7 @@ model OrderItem {
   quantity  Int
   unitPrice Decimal @db.Decimal(10, 2)
 
+  @@index([orderId])
   @@map("order_items")
 }
 
@@ -142,6 +148,7 @@ model Supplier {
 
   name String
 
+  @@index([tenantId])
   @@map("suppliers")
 }
 
