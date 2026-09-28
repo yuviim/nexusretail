@@ -13,13 +13,37 @@ env:
   ECS_CLUSTER: nexusretail-dev-cluster
   ECS_SERVICE: nexusretail-dev-api-service
   TASK_DEFINITION: nexusretail-dev-api
+  CONTAINER_NAME: nexusretail-api
 
 permissions:
   id-token: write   # required to mint the OIDC token for AssumeRoleWithWebIdentity
   contents: read
 
 jobs:
+  # Nothing here touches AWS. This used to not exist at all — every push
+  # to main went straight to building and deploying an image with no test
+  # run and no type check anywhere in the pipeline, so a broken build or a
+  # type error only surfaced once it was already live.
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: services/api/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+      - run: npx tsc --noEmit
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -40,20 +64,87 @@ jobs:
         working-directory: services/api
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }} -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          # Tagged by commit SHA, not just :latest — :latest + force-new-deployment
+          # (the old approach) restarts the same mutable tag, so "what's actually
+          # running" and "what does a rollback mean" both depend on remembering
+          # what :latest pointed to at deploy time. The task definition below is
+          # registered against this exact, immutable tag; :latest is also pushed
+          # alongside it purely for convenience (`docker pull` without a sha to
+          # look up), never used to decide what gets deployed.
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Force new ECS deployment
+      - name: Render new task definition with the new image
+        id: render-task-def
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          aws ecs describe-task-definition --task-definition "$TASK_DEFINITION" \
+            --query 'taskDefinition' > task-def.json
+
+          # describe-task-definition returns read-only/response-only fields
+          # (taskDefinitionArn, revision, status, ...) that register-task-definition
+          # rejects if you feed them straight back in — strip them, and swap in
+          # the new image.
+          jq --arg IMAGE "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' task-def.json > new-task-def.json
+
+          NEW_REVISION_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "revision_arn=$NEW_REVISION_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Run pending migrations as a one-off ECS task
+        id: migrate
+        env:
+          REVISION_ARN: ${{ steps.render-task-def.outputs.revision_arn }}
+        run: |
+          # Read the running service's own network config instead of hardcoding
+          # subnet/security-group IDs as new secrets — one less place for those
+          # to drift out of sync with what Terraform actually creates.
+          NETWORK_CONFIG=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].networkConfiguration')
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "$REVISION_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER_NAME\",\"command\":[\"npx\",\"prisma\",\"migrate\",\"deploy\"]}]}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Migration task: $TASK_ARN"
+
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[?name=='$CONTAINER_NAME'].exitCode | [0]" --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration task exited with code $EXIT_CODE — stopping before touching the live service."
+            echo "Logs: /ecs/nexusretail-dev-api, look for this task's ID: $TASK_ARN"
+            exit 1
+          fi
+          echo "Migrations applied cleanly."
+
+      - name: Deploy the new task definition revision
+        env:
+          REVISION_ARN: ${{ steps.render-task-def.outputs.revision_arn }}
         run: |
           aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --force-new-deployment
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$REVISION_ARN"
 
       - name: Wait for deployment to stabilize
         run: |
           aws ecs wait services-stable \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
