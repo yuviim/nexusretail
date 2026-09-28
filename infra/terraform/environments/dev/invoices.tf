@@ -1,8 +1,8 @@
 resource "aws_s3_bucket" "invoices" {
-  bucket = "nexusretail-dev-invoices-102268067799"
+  bucket = "${var.project_name}-dev-invoices-${var.aws_account_id}"
 
   tags = {
-    Name = "nexusretail-dev-invoices"
+    Name = "${var.project_name}-dev-invoices"
   }
 }
 

@@ -1,8 +1,8 @@
 resource "aws_route53_zone" "app" {
-  name = "nexusretail.yuvarajai.com"
+  name = var.domain_name
 
   tags = {
-    Name = "nexusretail-dev-zone"
+    Name = "${var.project_name}-dev-zone"
   }
 }
 
@@ -10,11 +10,11 @@ output "nameservers" {
   value = aws_route53_zone.app.name_servers
 }
 resource "aws_acm_certificate" "app" {
-  domain_name       = "nexusretail.yuvarajai.com"
+  domain_name       = var.domain_name
   validation_method = "DNS"
 
   tags = {
-    Name = "nexusretail-dev-cert"
+    Name = "${var.project_name}-dev-cert"
   }
 
   lifecycle {

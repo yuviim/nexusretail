@@ -68,7 +68,7 @@ resource "aws_lb_listener" "https" {
 
 resource "aws_route53_record" "app" {
   zone_id = aws_route53_zone.app.zone_id
-  name    = "nexusretail.yuvarajai.com"
+  name    = var.domain_name
   type    = "A"
 
   alias {

@@ -1,11 +1,11 @@
 # ---------------------------------------------------------------------------
-# Landing page: S3 + CloudFront, served at www.nexusretail.yuvarajai.com
-# Separate from the app (app.nexusretail.yuvarajai.com) and API
-# (nexusretail.yuvarajai.com) — purely additive, no changes to existing infra.
+# Landing page: S3 + CloudFront, served at www.<domain_name>
+# Separate from the app (app.<domain_name>) and API (<domain_name> itself)
+# — purely additive, no changes to existing infra.
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "landing" {
-  bucket = "nexusretail-dev-landing-102268067799"
+  bucket = "${var.project_name}-dev-landing-${var.aws_account_id}"
   tags = {
     Name = "nexusretail-dev-landing"
   }
@@ -70,7 +70,7 @@ resource "aws_cloudfront_distribution" "landing" {
     }
   }
 
-  aliases = ["www.nexusretail.yuvarajai.com"]
+  aliases = ["www.${var.domain_name}"]
 
   viewer_certificate {
     acm_certificate_arn      = aws_acm_certificate_validation.landing.certificate_arn
@@ -108,7 +108,7 @@ output "landing_cloudfront_domain" {
 
 resource "aws_acm_certificate" "landing" {
   provider          = aws.us_east_1
-  domain_name       = "www.nexusretail.yuvarajai.com"
+  domain_name       = "www.${var.domain_name}"
   validation_method = "DNS"
   tags = {
     Name = "nexusretail-dev-landing-cert"
@@ -141,7 +141,7 @@ resource "aws_acm_certificate_validation" "landing" {
 
 resource "aws_route53_record" "landing" {
   zone_id = aws_route53_zone.app.zone_id
-  name    = "www.nexusretail.yuvarajai.com"
+  name    = "www.${var.domain_name}"
   type    = "A"
   alias {
     name                   = aws_cloudfront_distribution.landing.domain_name

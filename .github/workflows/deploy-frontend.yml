@@ -9,8 +9,14 @@ on:
 
 env:
   AWS_REGION: eu-central-1
-  S3_BUCKET: nexusretail-dev-frontend-102268067799
-  CLOUDFRONT_DISTRIBUTION_ID: E1P3P938N88SKZ
+  # Deployment-specific, not something a workflow file can know ahead of
+  # time (S3_BUCKET depends on aws_account_id/project_name/domain_name,
+  # CLOUDFRONT_DISTRIBUTION_ID is assigned by AWS when Terraform creates
+  # the distribution) — set as repository variables (Settings > Secrets and
+  # variables > Actions > Variables) after `terraform apply`, from
+  # `terraform output`. See infra/README.md.
+  S3_BUCKET: ${{ vars.FRONTEND_S3_BUCKET }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.FRONTEND_CLOUDFRONT_DISTRIBUTION_ID }}
 
 permissions:
   id-token: write   # required to mint the OIDC token for AssumeRoleWithWebIdentity

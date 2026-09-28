@@ -92,6 +92,19 @@ resource "aws_ecs_task_definition" "app" {
         {
           name  = "COGNITO_APP_CLIENT_ID"
           value = aws_cognito_user_pool_client.app.id
+        },
+        {
+          # Previously unset here — the app only worked because
+          # index.ts's fallback default happened to match this real
+          # bucket name. Passing it explicitly means that fallback is
+          # now genuinely a local-dev-only convenience, never
+          # load-bearing in a real deployment.
+          name  = "INVOICES_BUCKET"
+          value = aws_s3_bucket.invoices.bucket
+        },
+        {
+          name  = "ALLOWED_ORIGIN"
+          value = "https://app.${var.domain_name}"
         }
       ]
       secrets = [

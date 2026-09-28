@@ -34,8 +34,19 @@ provider "aws" {
   region = "eu-central-1"
 }
 
+variable "aws_account_id" {
+  description = "AWS account ID this deploys into — folded into the state bucket's name to keep it globally unique. Must match the value used in environments/dev's terraform.tfvars."
+  type        = string
+}
+
+variable "project_name" {
+  description = "Prefix for the state bucket and lock table names. Must match environments/dev's terraform.tfvars."
+  type        = string
+  default     = "nexusretail"
+}
+
 resource "aws_s3_bucket" "tf_state" {
-  bucket = "nexusretail-terraform-state-102268067799"
+  bucket = "${var.project_name}-terraform-state-${var.aws_account_id}"
 }
 
 resource "aws_s3_bucket_versioning" "tf_state" {
@@ -63,7 +74,7 @@ resource "aws_s3_bucket_public_access_block" "tf_state" {
 }
 
 resource "aws_dynamodb_table" "tf_lock" {
-  name         = "nexusretail-terraform-locks"
+  name         = "${var.project_name}-terraform-locks"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
 

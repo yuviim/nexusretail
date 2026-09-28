@@ -81,7 +81,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload"
         ]
-        Resource = "arn:aws:ecr:eu-central-1:102268067799:repository/nexusretail-dev-api"
+        Resource = "arn:aws:ecr:eu-central-1:${var.aws_account_id}:repository/${var.project_name}-dev-api"
       },
       {
         Sid    = "ECSDeploy"
@@ -119,7 +119,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid      = "CloudFrontInvalidation"
         Effect   = "Allow"
         Action   = ["cloudfront:CreateInvalidation"]
-        Resource = "arn:aws:cloudfront::102268067799:distribution/${aws_cloudfront_distribution.frontend.id}"
+        Resource = "arn:aws:cloudfront::${var.aws_account_id}:distribution/${aws_cloudfront_distribution.frontend.id}"
       }
     ]
   })

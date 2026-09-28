@@ -34,7 +34,12 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-central-1' });
-const INVOICES_BUCKET = process.env.INVOICES_BUCKET || 'nexusretail-dev-invoices-102268067799';
+// ecs-task.tf now always passes the real bucket name explicitly, so this
+// fallback is only ever hit running outside Terraform-managed
+// infrastructure (a local run with STORAGE_MODE unset, say) — it's a
+// generic placeholder, not a real bucket, on purpose: this used to be a
+// real bucket name with this account's ID baked into the source.
+const INVOICES_BUCKET = process.env.INVOICES_BUCKET || 'nexusretail-invoices-not-configured';
 const cognito = new CognitoIdentityProviderClient({ region: process.env.AWS_REGION || 'eu-central-1' });
 // Not asserted non-null here (see middleware/auth.ts for why) — reading it
 // unconditionally at module scope with `!` was the other place the API
@@ -58,9 +63,11 @@ const LOCAL_UPLOADS_DIR = path.join(__dirname, '../uploads');
 
 // cors() with no options reflects whatever Origin header shows up, which is
 // the same as allowing every origin. ALLOWED_ORIGIN is set per environment
-// (the CloudFront app domain in dev/prod); falls back to the known dev
-// frontend so this doesn't silently open up if the env var is missing.
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://app.nexusretail.yuvarajai.com';
+// (ecs-task.tf now passes the real CloudFront app domain explicitly) and
+// falls back to a domain that resolves to nothing so a missing env var
+// fails closed instead of silently opening CORS up to every origin — this
+// used to be the real production domain hardcoded in source.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://allowed-origin-not-configured.invalid';
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 app.use(morgan('combined'));
 app.use(express.json());

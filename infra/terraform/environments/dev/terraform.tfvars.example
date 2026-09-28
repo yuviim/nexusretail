@@ -1,0 +1,32 @@
+# Copy to terraform.tfvars and fill in (or pass -var on the CLI). Never
+# commit the real terraform.tfvars — *.tfvars is already in .gitignore.
+
+# Your 12-digit AWS account ID. Folded into S3 bucket names (globally
+# unique across every AWS account) and a couple of IAM policy ARNs — must
+# match what you pass to infra/terraform/bootstrap.
+aws_account_id = "111111111111"
+
+# A domain you actually control in Route 53 (or are prepared to delegate
+# to a Route 53 hosted zone this creates). The API is served at the root
+# of this domain, the app at app.<domain_name>, the landing page at
+# www.<domain_name>.
+domain_name = "example.com"
+
+# project_name defaults to "nexusretail" — override only if you want to
+# run more than one copy of this stack in the same account.
+# project_name = "nexusretail"
+
+# Your current public IP, used to lock down bastion SSH access. Rotates —
+# see the README's note on this under Cost Management / the bastion
+# security group. Get it with: curl -s https://checkip.amazonaws.com
+my_ip = "203.0.113.1/32"
+
+alarm_email = "you@example.com"
+
+# ECR repository URI for the API image (create the ECR repo first, or via
+# a separate bootstrap step, then paste its URI here).
+ecr_repo_uri = "111111111111.dkr.ecr.eu-central-1.amazonaws.com/nexusretail-dev-api"
+
+# owner/repo this deploys from, used to scope the GitHub OIDC trust policy
+# (github-actions.tf) to only your fork.
+github_repo = "your-github-username/nexusretail"

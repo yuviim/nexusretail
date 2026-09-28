@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "frontend" {
-  bucket = "nexusretail-dev-frontend-102268067799"
+  bucket = "${var.project_name}-dev-frontend-${var.aws_account_id}"
 
   tags = {
     Name = "nexusretail-dev-frontend"
@@ -58,7 +58,7 @@ resource "aws_cloudfront_distribution" "frontend" {
       restriction_type = "none"
     }
   }
-  aliases = ["app.nexusretail.yuvarajai.com"]
+  aliases = ["app.${var.domain_name}"]
 
   viewer_certificate {
     acm_certificate_arn      = aws_acm_certificate_validation.frontend.certificate_arn
@@ -94,9 +94,20 @@ resource "aws_s3_bucket_policy" "frontend" {
 output "cloudfront_domain" {
   value = aws_cloudfront_distribution.frontend.domain_name
 }
+
+# Used to set the FRONTEND_S3_BUCKET / FRONTEND_CLOUDFRONT_DISTRIBUTION_ID
+# GitHub Actions repository variables deploy-frontend.yml reads — see
+# infra/README.md.
+output "frontend_bucket_name" {
+  value = aws_s3_bucket.frontend.bucket
+}
+
+output "frontend_cloudfront_distribution_id" {
+  value = aws_cloudfront_distribution.frontend.id
+}
 resource "aws_acm_certificate" "frontend" {
   provider          = aws.us_east_1
-  domain_name       = "app.nexusretail.yuvarajai.com"
+  domain_name       = "app.${var.domain_name}"
   validation_method = "DNS"
 
   tags = {
@@ -132,7 +143,7 @@ resource "aws_acm_certificate_validation" "frontend" {
 
 resource "aws_route53_record" "frontend" {
   zone_id = aws_route53_zone.app.zone_id
-  name    = "app.nexusretail.yuvarajai.com"
+  name    = "app.${var.domain_name}"
   type    = "A"
 
   alias {
