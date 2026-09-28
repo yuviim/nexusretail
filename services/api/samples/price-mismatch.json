@@ -1,0 +1,10 @@
+{
+  "vendorName": "Sunrise Coffee Supply Co",
+  "invoiceDate": "2026-09-21",
+  "totalAmount": 350.00,
+  "subtotalAmount": 350.00,
+  "poNumber": "PO-1002",
+  "lineItems": [
+    { "description": "Oat milk, 1L", "quantity": 100, "unitPrice": 3.50, "totalPrice": 350.00 }
+  ]
+}

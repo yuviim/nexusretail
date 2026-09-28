@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { prisma } from './prisma';
 import { requireAuth, requireSuperAdmin, requireRole, AuthenticatedRequest, AUTH_MODE, encodeLocalToken } from './middleware/auth';
 import multer from 'multer';
@@ -28,6 +30,19 @@ const cognito = new CognitoIdentityProviderClient({ region: process.env.AWS_REGI
 // is only actually needed inside the /team route below, and only when
 // AUTH_MODE isn't 'local'.
 const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
+
+// STORAGE_MODE=local and TEXTRACT_MODE=mock let /invoices/upload run with
+// no S3 bucket and no Textract call — see samples/README.md for the three
+// fixture invoices TEXTRACT_MODE=mock recognizes. Neither is guarded
+// against NODE_ENV=production the way AUTH_MODE=local is: writing an
+// upload to disk instead of S3, or returning a canned extraction instead
+// of a real one, produces visibly wrong behavior immediately (files
+// "vanish" on redeploy, every upload gets the same 3 outcomes) rather than
+// the silent security hole AUTH_MODE=local would be, so a real deploy
+// simply has no reason to ever set these.
+const STORAGE_MODE = (process.env.STORAGE_MODE || 's3').toLowerCase();
+const TEXTRACT_MODE = (process.env.TEXTRACT_MODE || 'aws').toLowerCase();
+const LOCAL_UPLOADS_DIR = path.join(__dirname, '../uploads');
 
 // cors() with no options reflects whatever Origin header shows up, which is
 // the same as allowing every origin. ALLOWED_ORIGIN is set per environment
@@ -516,7 +531,6 @@ app.post(
         });
       }
 
-      const { extractInvoice } = await import('./agents/tools/extractInvoice');
       const { findPurchaseOrderByNumber } = await import('./agents/tools/findPurchaseOrderByNumber');
       const { matchPurchaseOrder } = await import('./agents/tools/matchPurchaseOrder');
 
@@ -539,20 +553,36 @@ app.post(
       // Tenant-prefixed, content-addressed key instead of
       // `uploads/{timestamp}-{originalname}`: the old key had no tenant
       // boundary in the object path and forwarded the caller's filename
-      // (unsanitized) straight into S3.
-      const s3Key = `invoices/${tenantId}/${crypto.randomUUID()}.${fileExtension}`;
+      // (unsanitized) straight into S3 (or, in STORAGE_MODE=local, the
+      // local uploads/ directory — same key shape either way).
+      const storageKey = `invoices/${tenantId}/${crypto.randomUUID()}.${fileExtension}`;
       console.log(`[invoice-upload] received file "${req.file.originalname}" (${req.file.size} bytes), tenant=${tenantId}`);
 
-      await s3.send(new PutObjectCommand({
-        Bucket: INVOICES_BUCKET,
-        Key: s3Key,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-      }));
-      console.log(`[invoice-upload] stored in S3 at s3://${INVOICES_BUCKET}/${s3Key}`);
+      if (STORAGE_MODE === 'local') {
+        const destPath = path.join(LOCAL_UPLOADS_DIR, storageKey);
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        fs.writeFileSync(destPath, req.file.buffer);
+        console.log(`[invoice-upload] stored locally at ${destPath}`);
+      } else {
+        await s3.send(new PutObjectCommand({
+          Bucket: INVOICES_BUCKET,
+          Key: storageKey,
+          Body: req.file.buffer,
+          ContentType: req.file.mimetype,
+        }));
+        console.log(`[invoice-upload] stored in S3 at s3://${INVOICES_BUCKET}/${storageKey}`);
+      }
 
-      const invoice = await extractInvoice(INVOICES_BUCKET, s3Key);
-      console.log(`[invoice-upload] Textract extraction complete: vendor="${invoice.vendorName}", poNumber="${invoice.poNumber || 'NOT FOUND'}"`);
+      let invoice;
+      if (TEXTRACT_MODE === 'mock') {
+        const { mockExtractInvoice } = await import('./agents/tools/mockExtractInvoice');
+        invoice = mockExtractInvoice(fileHash);
+        console.log(`[invoice-upload] TEXTRACT_MODE=mock: using fixture for vendor="${invoice.vendorName}", poNumber="${invoice.poNumber || 'NOT FOUND'}"`);
+      } else {
+        const { extractInvoice } = await import('./agents/tools/extractInvoice');
+        invoice = await extractInvoice(INVOICES_BUCKET, storageKey);
+        console.log(`[invoice-upload] Textract extraction complete: vendor="${invoice.vendorName}", poNumber="${invoice.poNumber || 'NOT FOUND'}"`);
+      }
 
       if (!invoice.poNumber) {
         console.log(`[invoice-upload] no PO number extracted — stopping, no automatic match attempted`);

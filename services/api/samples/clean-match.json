@@ -1,0 +1,10 @@
+{
+  "vendorName": "Sunrise Coffee Supply Co",
+  "invoiceDate": "2026-09-20",
+  "totalAmount": 470.00,
+  "subtotalAmount": 470.00,
+  "poNumber": "PO-1001",
+  "lineItems": [
+    { "description": "Espresso beans, 1kg", "quantity": 50, "unitPrice": 9.40, "totalPrice": 470.00 }
+  ]
+}

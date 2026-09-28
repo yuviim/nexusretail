@@ -1,0 +1,11 @@
+{
+  "vendorName": "Sunrise Coffee Supply Co",
+  "invoiceDate": "2026-09-22",
+  "totalAmount": 295.00,
+  "subtotalAmount": 295.00,
+  "poNumber": "PO-1003",
+  "lineItems": [
+    { "description": "Vanilla syrup, 750ml", "quantity": 30, "unitPrice": 8.50, "totalPrice": 255.00 },
+    { "description": "Napkins, 500pk", "quantity": 10, "unitPrice": 4.00, "totalPrice": 40.00 }
+  ]
+}

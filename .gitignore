@@ -26,3 +26,6 @@ __pycache__/
 # Secrets / keys
 *.pem
 .env
+
+# STORAGE_MODE=local writes uploaded invoices here instead of S3
+services/api/uploads/
