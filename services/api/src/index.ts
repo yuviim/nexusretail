@@ -6,6 +6,17 @@ import fs from 'fs';
 import path from 'path';
 import { prisma } from './prisma';
 import { requireAuth, requireSuperAdmin, requireRole, AuthenticatedRequest, AUTH_MODE, encodeLocalToken } from './middleware/auth';
+import {
+  validateBody,
+  localLoginSchema,
+  createProductSchema,
+  updateProductSchema,
+  updateStockSchema,
+  createOrderSchema,
+  updateOrderStatusSchema,
+  createTeamMemberSchema,
+  approvePurchaseOrderSchema,
+} from './validation';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
@@ -15,6 +26,7 @@ import {
   UsernameExistsException,
 } from '@aws-sdk/client-cognito-identity-provider';
 import morgan from 'morgan';
+import { z } from 'zod';
 
 dotenv.config();
 
@@ -65,11 +77,8 @@ app.get('/', (req, res) => {
 // encoding their real cognitoSub, so requireAuth resolves it to the exact
 // same tenant/user a real sign-in would.
 if (AUTH_MODE === 'local') {
-  app.post('/auth/local-login', async (req, res) => {
-    const { email } = req.body as { email?: string };
-    if (!email) {
-      return res.status(400).json({ error: 'email is required' });
-    }
+  app.post('/auth/local-login', validateBody(localLoginSchema), async (req, res) => {
+    const { email } = req.body as z.infer<typeof localLoginSchema>;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.cognitoSub) {
       return res.status(404).json({ error: 'No local user with that email. Run `npx prisma db seed`?' });
@@ -92,16 +101,9 @@ app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post('/products', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
+app.post('/products', requireAuth, requireRole('owner', 'staff'), validateBody(createProductSchema), async (req: AuthenticatedRequest, res) => {
   try {
-    const { sku, name, unitPrice, reorderPoint, warehouseId, initialQuantity } = req.body as {
-      sku: string; name: string; unitPrice: string; reorderPoint: number;
-      warehouseId: string; initialQuantity: number;
-    };
-
-    if (!sku || !name || !unitPrice || !warehouseId) {
-      return res.status(400).json({ error: 'sku, name, unitPrice, and warehouseId are required' });
-    }
+    const { sku, name, unitPrice, reorderPoint, warehouseId, initialQuantity } = req.body as z.infer<typeof createProductSchema>;
 
     const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
     if (!warehouse || warehouse.tenantId !== req.tenantId) {
@@ -111,9 +113,9 @@ app.post('/products', requireAuth, requireRole('owner', 'staff'), async (req: Au
     const product = await prisma.product.create({
       data: {
         tenantId: req.tenantId as string,
-        sku, name, unitPrice, reorderPoint: reorderPoint ?? 0,
+        sku, name, unitPrice, reorderPoint,
         stockLevels: {
-          create: [{ warehouseId, quantityOnHand: initialQuantity ?? 0 }],
+          create: [{ warehouseId, quantityOnHand: initialQuantity }],
         },
       },
       include: { stockLevels: { include: { warehouse: true } } },
@@ -129,7 +131,7 @@ app.post('/products', requireAuth, requireRole('owner', 'staff'), async (req: Au
   }
 });
 
-app.patch('/products/:id', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
+app.patch('/products/:id', requireAuth, requireRole('owner', 'staff'), validateBody(updateProductSchema), async (req: AuthenticatedRequest, res) => {
   try {
     const productId = req.params.id as string;
     const existing = await prisma.product.findUnique({ where: { id: productId } });
@@ -137,7 +139,7 @@ app.patch('/products/:id', requireAuth, requireRole('owner', 'staff'), async (re
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    const { name, unitPrice, reorderPoint } = req.body;
+    const { name, unitPrice, reorderPoint } = req.body as z.infer<typeof updateProductSchema>;
     const product = await prisma.product.update({
       where: { id: productId },
       data: {
@@ -155,10 +157,10 @@ app.patch('/products/:id', requireAuth, requireRole('owner', 'staff'), async (re
   }
 });
 
-app.patch('/products/:id/stock', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
+app.patch('/products/:id/stock', requireAuth, requireRole('owner', 'staff'), validateBody(updateStockSchema), async (req: AuthenticatedRequest, res) => {
   try {
     const productId = req.params.id as string;
-    const { warehouseId, quantityOnHand } = req.body as { warehouseId: string; quantityOnHand: number };
+    const { warehouseId, quantityOnHand } = req.body as z.infer<typeof updateStockSchema>;
 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product || product.tenantId !== req.tenantId) {
@@ -247,16 +249,9 @@ app.get('/orders', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post('/orders', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
+app.post('/orders', requireAuth, requireRole('owner', 'staff'), validateBody(createOrderSchema), async (req: AuthenticatedRequest, res) => {
   try {
-    const { customerId, items } = req.body as {
-      customerId: string;
-      items: { productId: string; quantity: number }[];
-    };
-
-    if (!customerId || !items?.length) {
-      return res.status(400).json({ error: 'customerId and at least one item are required' });
-    }
+    const { customerId, items } = req.body as z.infer<typeof createOrderSchema>;
 
     const customer = await prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer || customer.tenantId !== req.tenantId) {
@@ -311,15 +306,10 @@ app.get('/orders/:id', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.patch('/orders/:id/status', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
+app.patch('/orders/:id/status', requireAuth, requireRole('owner', 'staff'), validateBody(updateOrderStatusSchema), async (req: AuthenticatedRequest, res) => {
   try {
     const orderId = req.params.id as string;
-    const { status } = req.body;
-    const validStatuses = ['placed', 'stock_reserved', 'payment', 'fulfilled'];
-
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
-    }
+    const { status } = req.body as z.infer<typeof updateOrderStatusSchema>;
 
     const existing = await prisma.order.findUnique({ where: { id: orderId } });
     if (!existing || existing.tenantId !== req.tenantId) {
@@ -347,13 +337,8 @@ app.get('/team', requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.post('/team', requireAuth, requireRole('owner'), async (req: AuthenticatedRequest, res) => {
-  const { email, name, role } = req.body as { email: string; name: string; role: string };
-  const validRoles = ['owner', 'staff', 'read_only'];
-
-  if (!email || !name || !validRoles.includes(role)) {
-    return res.status(400).json({ error: `role must be one of: ${validRoles.join(', ')}` });
-  }
+app.post('/team', requireAuth, requireRole('owner'), validateBody(createTeamMemberSchema), async (req: AuthenticatedRequest, res) => {
+  const { email, name, role } = req.body as z.infer<typeof createTeamMemberSchema>;
 
   // This used to only create the database row and leave the actual Cognito
   // account to be created by hand, out of band. That gap is what let a
@@ -491,9 +476,9 @@ app.get('/purchase-orders/:id', requireAuth, async (req: AuthenticatedRequest, r
   }
 });
 
-app.post('/purchase-orders/:id/approve', requireAuth, requireRole('owner', 'staff'), async (req: AuthenticatedRequest, res) => {
+app.post('/purchase-orders/:id/approve', requireAuth, requireRole('owner', 'staff'), validateBody(approvePurchaseOrderSchema), async (req: AuthenticatedRequest, res) => {
   try {
-    const { warehouseId } = req.body as { warehouseId?: string };
+    const { warehouseId } = req.body as z.infer<typeof approvePurchaseOrderSchema>;
     const { updateStock } = await import('./agents/tools/updateStock');
     const result = await updateStock(req.tenantId as string, req.params.id as string, warehouseId);
     res.json(result);
