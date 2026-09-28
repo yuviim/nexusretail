@@ -9,6 +9,10 @@ datasource db {
 
 model Tenant {
   id        String   @id @default(uuid())
+  // Stable, human-chosen key so the seed script can upsert tenants instead
+  // of creating a duplicate on every run — id is a random uuid and name
+  // alone isn't unique, neither works as an idempotency key.
+  slug      String   @unique
   name      String
   createdAt DateTime @default(now())
 
