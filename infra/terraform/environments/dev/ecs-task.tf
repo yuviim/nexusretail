@@ -130,6 +130,6 @@ resource "aws_ecs_task_definition" "app" {
 }
 
 variable "ecr_repo_uri" {
-  description = "ECR repository URI for the placeholder API image"
+  description = "ECR repository URI for the API image"
   type        = string
 }
