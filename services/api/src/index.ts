@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { prisma } from './prisma';
-import { requireAuth, requireSuperAdmin, requireRole, AuthenticatedRequest } from './middleware/auth';
+import { requireAuth, requireSuperAdmin, requireRole, AuthenticatedRequest, AUTH_MODE, encodeLocalToken } from './middleware/auth';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
@@ -22,7 +22,12 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-central-1' });
 const INVOICES_BUCKET = process.env.INVOICES_BUCKET || 'nexusretail-dev-invoices-102268067799';
 const cognito = new CognitoIdentityProviderClient({ region: process.env.AWS_REGION || 'eu-central-1' });
-const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID!;
+// Not asserted non-null here (see middleware/auth.ts for why) — reading it
+// unconditionally at module scope with `!` was the other place the API
+// crashed on startup without real Cognito config, even though this value
+// is only actually needed inside the /team route below, and only when
+// AUTH_MODE isn't 'local'.
+const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
 
 // cors() with no options reflects whatever Origin header shows up, which is
 // the same as allowing every origin. ALLOWED_ORIGIN is set per environment
@@ -36,6 +41,28 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.status(200).send('NexusRetail API is alive');
 });
+
+// Only registered — doesn't exist as a route at all — when AUTH_MODE is
+// 'local', which middleware/auth.ts already refuses to allow under
+// NODE_ENV=production. Trades a real Cognito sign-in (InitiateAuth against
+// a real user pool, needs an AWS account) for looking up one of the users
+// prisma/seed.ts created by email and handing back a local dev token
+// encoding their real cognitoSub, so requireAuth resolves it to the exact
+// same tenant/user a real sign-in would.
+if (AUTH_MODE === 'local') {
+  app.post('/auth/local-login', async (req, res) => {
+    const { email } = req.body as { email?: string };
+    if (!email) {
+      return res.status(400).json({ error: 'email is required' });
+    }
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.cognitoSub) {
+      return res.status(404).json({ error: 'No local user with that email. Run `npx prisma db seed`?' });
+    }
+    const token = encodeLocalToken({ sub: user.cognitoSub, email_verified: true, email: user.email });
+    res.json({ token, email: user.email, role: user.role });
+  });
+}
 
 app.get('/products', requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
@@ -320,30 +347,41 @@ app.post('/team', requireAuth, requireRole('owner'), async (req: AuthenticatedRe
   // account did, so nothing tied the two together until whoever signed in
   // first with that email claimed it. Creating the Cognito user here, and
   // storing the `sub` it returns immediately, closes that window entirely.
+  //
+  // In AUTH_MODE=local there's no real user pool to create anything in —
+  // stand in a random uuid as the "sub" instead, which is exactly what a
+  // real cognitoSub is to the rest of this app: an opaque, immutable key.
   let cognitoSub: string;
-  try {
-    const result = await cognito.send(
-      new AdminCreateUserCommand({
-        UserPoolId: COGNITO_USER_POOL_ID,
-        Username: email,
-        UserAttributes: [
-          { Name: 'email', Value: email },
-          { Name: 'email_verified', Value: 'true' },
-          { Name: 'name', Value: name },
-        ],
-      })
-    );
-    const sub = result.User?.Attributes?.find((a) => a.Name === 'sub')?.Value;
-    if (!sub) {
-      throw new Error('Cognito did not return a sub for the new user');
+  if (AUTH_MODE === 'local') {
+    cognitoSub = crypto.randomUUID();
+  } else {
+    if (!COGNITO_USER_POOL_ID) {
+      return res.status(500).json({ error: 'COGNITO_USER_POOL_ID is not configured' });
     }
-    cognitoSub = sub;
-  } catch (err) {
-    if (err instanceof UsernameExistsException) {
-      return res.status(409).json({ error: 'A Cognito user with this email already exists' });
+    try {
+      const result = await cognito.send(
+        new AdminCreateUserCommand({
+          UserPoolId: COGNITO_USER_POOL_ID,
+          Username: email,
+          UserAttributes: [
+            { Name: 'email', Value: email },
+            { Name: 'email_verified', Value: 'true' },
+            { Name: 'name', Value: name },
+          ],
+        })
+      );
+      const sub = result.User?.Attributes?.find((a) => a.Name === 'sub')?.Value;
+      if (!sub) {
+        throw new Error('Cognito did not return a sub for the new user');
+      }
+      cognitoSub = sub;
+    } catch (err) {
+      if (err instanceof UsernameExistsException) {
+        return res.status(409).json({ error: 'A Cognito user with this email already exists' });
+      }
+      console.error(err);
+      return res.status(502).json({ error: 'Failed to create the Cognito user' });
     }
-    console.error(err);
-    return res.status(502).json({ error: 'Failed to create the Cognito user' });
   }
 
   try {
@@ -355,11 +393,15 @@ app.post('/team', requireAuth, requireRole('owner'), async (req: AuthenticatedRe
     // Don't leave an orphaned Cognito user behind if the DB row couldn't be
     // created (most likely: this email already has a `users` row, so the
     // @unique on email conflicts, even though the Cognito call above
-    // succeeded because that email had no Cognito account yet).
-    try {
-      await cognito.send(new AdminDeleteUserCommand({ UserPoolId: COGNITO_USER_POOL_ID, Username: email }));
-    } catch (cleanupErr) {
-      console.error('Failed to roll back Cognito user after DB error:', cleanupErr);
+    // succeeded because that email had no Cognito account yet). Nothing to
+    // roll back in local mode — cognitoSub there is just a uuid, not a
+    // real Cognito user.
+    if (AUTH_MODE !== 'local' && COGNITO_USER_POOL_ID) {
+      try {
+        await cognito.send(new AdminDeleteUserCommand({ UserPoolId: COGNITO_USER_POOL_ID, Username: email }));
+      } catch (cleanupErr) {
+        console.error('Failed to roll back Cognito user after DB error:', cleanupErr);
+      }
     }
     if (err.code === 'P2002') {
       return res.status(409).json({ error: 'A user with this email already exists' });
