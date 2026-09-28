@@ -16,6 +16,56 @@ I also used this project as my hands-on companion while studying for the AWS Sol
 
 ---
 
+## Quick start
+
+Runs the whole app locally with no AWS account — a local Postgres, mock
+Textract, and a local dev auth mode standing in for RDS/Textract/Cognito.
+This is not what's deployed at the live app link above (that's the real
+AWS build described below); it's the fastest way to clone this repo and
+actually see the product run.
+
+```bash
+git clone https://github.com/yuviim/nexusretail.git
+cd nexusretail
+cp services/api/.env.example services/api/.env
+cp services/web/.env.example services/web/.env
+docker compose up
+```
+
+First run pulls images and runs `npm ci` inside both containers, so give
+it a couple of minutes. Once `api` logs show it's listening, open
+http://localhost:5173 and sign in as `owner@northwind.test` (any
+password — see [AUTH_MODE=local](#auth_modelocal) below).
+
+Try the invoice-matching pipeline without any AWS credentials: go to a
+purchase order (seeded as `PO-1001`, `PO-1002`, `PO-1003`) and upload one
+of the three files in `services/api/samples/` — see
+[`samples/README.md`](services/api/samples/README.md) for which file
+produces which outcome (clean match / price mismatch / extra line item).
+
+`docker compose down -v` tears it down, including the database volume, for
+a truly clean slate.
+
+### AUTH_MODE=local
+
+Real Cognito needs a deployed user pool, which is exactly what the local
+setup above is trying to avoid needing. `AUTH_MODE=local` (the default in
+`.env.example`) swaps real JWT verification for a fixed dev token minted
+against whichever seeded user's email you sign in with — no password
+check happens in this mode, the login form's password field is ignored.
+It's guarded, not just a convention: the API refuses to start at all if
+`AUTH_MODE=local` and `NODE_ENV=production` are both set, so this can't
+end up live by an env var someone forgot to change. See the comments in
+`services/api/src/middleware/auth.ts` for the full reasoning.
+
+### Running against the real AWS stack instead
+
+If you have your own AWS account and want to provision the real
+infrastructure (RDS, Cognito, S3, Textract) instead of the local/mock
+stand-ins, see [`infra/README.md`](infra/README.md) for the deploy order.
+
+---
+
 ## What's Built
 
 ### Core Platform
@@ -48,7 +98,7 @@ A CloudWatch dashboard covering ECS CPU, memory, and running task count, ALB req
 
 ### Cost Management
 
-Since this runs on a personally-billed AWS account, I built a single startup script that checks my current IP against what's allowed in the security group, updates and applies Terraform automatically if it's changed, starts the bastion and RDS and waits for each to actually be ready before continuing, scales ECS back up, opens the SSH tunnel I use for database access, and finishes with a real health check against the live API and app URLs. A matching shutdown script scales everything back down. Both exist because I was manually chasing IP changes and race conditions between services often enough that it was worth automating properly.
+Since this runs on a personally-billed AWS account, I don't leave the dev stack running when I'm not actively using it: scale ECS to zero, stop the bastion and RDS, and bring them back before a work session. In practice that's meant repeating the same sequence by hand often enough (check my current IP against the security group and re-apply Terraform if it's rotated, start the bastion and RDS and wait for each to actually be ready, scale ECS back up, open the SSH tunnel, confirm the live API and app URLs actually respond) that it belongs in `infra/` as a real script rather than muscle memory — that's on the roadmap below, not done yet. `transfer_db_secret_ownership.sh` is the one operational script actually committed so far.
 
 ### AI Invoice Processing Pipeline
 
@@ -96,6 +146,7 @@ Multi-tenant inventory tracking, purchase orders, and order management, with an 
 - [x] Move CI off long-lived IAM user keys onto GitHub OIDC + an assumed role
 - [x] Add real unit tests for the invoice-matching logic instead of shipping with zero test coverage
 - [ ] Migrate Terraform state off local disk onto S3 + DynamoDB locking (`infra/terraform/bootstrap` creates the bucket and lock table; `environments/dev/backend.tf` is ready — just needs `terraform init -migrate-state` run once against a real AWS session)
+- [ ] Commit the startup/shutdown routine described under Cost Management as a real script instead of repeating it by hand
 - [ ] Unblock and deploy the Bedrock orchestrator agent
 - [ ] Continue AWS SAA domain review, using this project's own architecture as the running example
 

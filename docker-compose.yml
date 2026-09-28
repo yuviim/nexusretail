@@ -1,0 +1,64 @@
+# Local dev only — not what deploy.yml builds and pushes to ECR (see
+# services/api/Dockerfile for that). This runs the API and web app straight
+# from source with tsx/Vite's dev servers and hot reload, against a
+# throwaway local Postgres, so `git clone && docker compose up` is enough
+# to get a working app with no AWS account — see the README's Quick start.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: nexusretail
+      POSTGRES_PASSWORD: nexusretail
+      POSTGRES_DB: nexusretail
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexusretail"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  api:
+    image: node:20-slim
+    working_dir: /app
+    # node_modules gets its own volume instead of coming from the bind
+    # mount — installing on the host (macOS/arm64, say) and running in a
+    # linux/amd64 container would otherwise ship native-binding mismatches
+    # (Prisma's engine among them) straight into the container.
+    volumes:
+      - ./services/api:/app
+      - api-node-modules:/app/node_modules
+    env_file:
+      - ./services/api/.env
+    environment:
+      DATABASE_URL: postgresql://nexusretail:nexusretail@db:5432/nexusretail?schema=public
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm ci && npx prisma migrate deploy && npx prisma db seed && npm run dev"
+
+  web:
+    image: node:20-slim
+    working_dir: /app
+    volumes:
+      - ./services/web:/app
+      - web-node-modules:/app/node_modules
+    env_file:
+      - ./services/web/.env
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+
+volumes:
+  db-data:
+  api-node-modules:
+  web-node-modules:
