@@ -37,6 +37,13 @@ resource "aws_security_group" "rds" {
 # password out of thin air, and can only ever reflect what's actually
 # there. Rotate deliberately (update the secret, then ModifyDBInstance),
 # not as a side effect of recovering from an unrelated apply.
+#
+# This environment only ever *reads* the secret — it used to also own it as
+# a resource here, which meant a truly from-scratch apply (or one after a
+# full teardown that deleted the secret) would fail: the data source has to
+# read something that already exists, and nothing earlier in this same
+# stack had created it yet. The bootstrap stack (infra/terraform/bootstrap)
+# seeds it once, before this environment ever runs.
 data "aws_secretsmanager_secret" "db_credentials" {
   name = "nexusretail-dev-db-credentials"
 }
@@ -47,25 +54,6 @@ data "aws_secretsmanager_secret_version" "db_credentials" {
 
 locals {
   db_password = jsondecode(data.aws_secretsmanager_secret_version.db_credentials.secret_string).password
-}
-
-# Container for the credentials — still Terraform-managed for lifecycle
-# purposes, but its value now comes from local.db_password above, not from
-# a resource Terraform can regenerate on its own.
-resource "aws_secretsmanager_secret" "db_credentials" {
-  name = "nexusretail-dev-db-credentials"
-}
-
-resource "aws_secretsmanager_secret_version" "db_credentials" {
-  secret_id = aws_secretsmanager_secret.db_credentials.id
-  secret_string = jsonencode({
-    username = "nexusretail_admin"
-    password = local.db_password
-  })
-
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
 }
 
 # The RDS instance itself

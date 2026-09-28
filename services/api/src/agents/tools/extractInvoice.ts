@@ -13,6 +13,13 @@ export interface ExtractedInvoice {
   vendorName: string | null;
   invoiceDate: string | null;
   totalAmount: number | null;
+  // Textract's SUBTOTAL, when present — excludes tax/shipping, so it's the
+  // more meaningful figure to compare against a PO's line-item total. Most
+  // real invoices only have TOTAL (tax + shipping folded in), which almost
+  // never equals qty * price summed across lines even for a fully correct
+  // delivery — see matchLogic's comment on why a totals mismatch is a
+  // warning, not a failure.
+  subtotalAmount: number | null;
   poNumber: string | null;
   lineItems: ExtractedLineItem[];
 }
@@ -40,6 +47,8 @@ export async function extractInvoice(s3Bucket: string, s3Key: string): Promise<E
   const poNumber = getSummaryValue('PO_NUMBER');
   const totalRaw = getSummaryValue('TOTAL');
   const totalAmount = totalRaw ? parseFloat(totalRaw.replace(/[^0-9.]/g, '')) : null;
+  const subtotalRaw = getSummaryValue('SUBTOTAL');
+  const subtotalAmount = subtotalRaw ? parseFloat(subtotalRaw.replace(/[^0-9.]/g, '')) : null;
 
   const lineItems: ExtractedLineItem[] = (doc.LineItemGroups ?? []).flatMap((group) =>
     (group.LineItems ?? []).map((item) => {
@@ -58,5 +67,5 @@ export async function extractInvoice(s3Bucket: string, s3Key: string): Promise<E
     })
   );
 
-  return { vendorName, invoiceDate, totalAmount, poNumber, lineItems };
+  return { vendorName, invoiceDate, totalAmount, subtotalAmount, poNumber, lineItems };
 }

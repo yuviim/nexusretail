@@ -57,9 +57,16 @@ resource "aws_cognito_user_pool_client" "app" {
 
   # Belt-and-suspenders on top of disabling self-signup: even an
   # authenticated user calling UpdateUserAttributes can't touch
-  # custom:tenant_id from this client. Every other standard attribute is
-  # still writable so profile edits keep working.
-  write_attributes = ["email", "name", "family_name", "given_name"]
+  # custom:tenant_id from this client. `email` is deliberately left out too
+  # now that the API keys its user lookup on the immutable `sub` claim
+  # instead of email — a self-editable email was the whole hole a second
+  # fix (a database row with no matching Cognito account until the API
+  # started calling AdminCreateUser itself) let someone drive through:
+  # change your own email to one a victim tenant had just invited, and
+  # you'd resolve into their tenant on your next token, before they ever
+  # signed in. Every other standard attribute is still writable so profile
+  # edits keep working.
+  write_attributes = ["name", "family_name", "given_name"]
 }
 
 output "cognito_user_pool_id" {
@@ -73,4 +80,27 @@ resource "aws_cognito_user_group" "super_admin" {
   name         = "super-admin"
   user_pool_id = aws_cognito_user_pool.main.id
   description  = "Platform-level administrators with cross-tenant access"
+}
+
+# Lets the API create (and, on a failed matching DB write, roll back) the
+# actual Cognito user for POST /team, instead of that route creating only a
+# database row and leaving the Cognito side to a manual admin step.
+resource "aws_iam_role_policy" "ecs_cognito_admin" {
+  name = "nexusretail-dev-ecs-cognito-admin"
+  role = aws_iam_role.ecs_task_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "TeamProvisioning"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminDeleteUser",
+        ]
+        Resource = aws_cognito_user_pool.main.arn
+      }
+    ]
+  })
 }

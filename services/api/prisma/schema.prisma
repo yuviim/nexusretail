@@ -30,9 +30,15 @@ model User {
   tenant   Tenant @relation(fields: [tenantId], references: [id])
 
   email     String   @unique
-  name      String
-  role      String   @default("staff") // owner | staff | read_only
-  createdAt DateTime @default(now())
+  // Cognito's immutable subject claim. Nullable because rows created before
+  // this column existed need a one-time backfill (see the migration and
+  // scripts/backfill-cognito-sub.ts) — requireAuth refuses to authenticate
+  // a token whose sub has no matching row, so an un-backfilled user is
+  // simply locked out rather than silently falling back to email lookup.
+  cognitoSub String?  @unique
+  name       String
+  role       String   @default("staff") // owner | staff | read_only
+  createdAt  DateTime @default(now())
 
   @@map("users")
 }

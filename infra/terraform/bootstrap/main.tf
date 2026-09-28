@@ -23,6 +23,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -66,5 +70,36 @@ resource "aws_dynamodb_table" "tf_lock" {
   attribute {
     name = "LockID"
     type = "S"
+  }
+}
+
+# Seeds the RDS credentials secret. environments/dev only ever *reads* this
+# secret (a data source, not a resource — see rds.tf) precisely so a fresh
+# apply there can't invent a new password and desync it from the running
+# instance. But a data source has to read something that already exists,
+# which is impossible on a truly from-scratch account, or after a full
+# teardown that deleted the secret along with everything else — this
+# bootstrap stack runs first and only once, so it's the right place to
+# create that starting value. Rotate deliberately after this (update the
+# secret, then a manual ModifyDBInstance), never by re-running this or
+# environments/dev.
+resource "random_password" "db_initial" {
+  length  = 24
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "db_credentials" {
+  name = "nexusretail-dev-db-credentials"
+}
+
+resource "aws_secretsmanager_secret_version" "db_credentials" {
+  secret_id = aws_secretsmanager_secret.db_credentials.id
+  secret_string = jsonencode({
+    username = "nexusretail_admin"
+    password = random_password.db_initial.result
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
   }
 }

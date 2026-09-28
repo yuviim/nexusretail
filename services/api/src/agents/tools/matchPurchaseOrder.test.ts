@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { computeLineMatches, type PoItemForMatching } from './matchLogic';
+import { computeLineMatches, isFullMatch, type PoItemForMatching } from './matchLogic';
 import type { ExtractedInvoice } from './extractInvoice';
 
-function invoice(lineItems: ExtractedInvoice['lineItems'], totalAmount: number | null = null): ExtractedInvoice {
-  return { vendorName: 'Test Vendor', invoiceDate: null, poNumber: 'PO-1', totalAmount, lineItems };
+function invoice(
+  lineItems: ExtractedInvoice['lineItems'],
+  totalAmount: number | null = null,
+  subtotalAmount: number | null = null
+): ExtractedInvoice {
+  return { vendorName: 'Test Vendor', invoiceDate: null, poNumber: 'PO-1', totalAmount, subtotalAmount, lineItems };
 }
 
 function poItem(overrides: Partial<PoItemForMatching> = {}): PoItemForMatching {
@@ -81,5 +85,30 @@ describe('computeLineMatches', () => {
       invoice([{ description: 'Espresso beans, 1kg', quantity: 10, unitPrice: 25, totalPrice: 250 }], null)
     );
     expect(invoiceTotalMatch).toBeNull();
+  });
+
+  it('compares against SUBTOTAL, not TOTAL, when Textract found a subtotal', () => {
+    // expected total is 250. TOTAL of 275 (e.g. with tax/shipping folded
+    // in) would mismatch, but SUBTOTAL of 250 is exactly right — SUBTOTAL
+    // should win.
+    const { invoiceTotalMatch } = computeLineMatches(
+      [poItem({ expectedQty: 10, expectedUnitPrice: 25 })],
+      invoice([{ description: 'Espresso beans, 1kg', quantity: 10, unitPrice: 25, totalPrice: 250 }], 275, 250)
+    );
+    expect(invoiceTotalMatch).toBe(true);
+  });
+
+  it('does not let a total mismatch flip an otherwise-clean match to flagged', () => {
+    // Every line item matches exactly and there are no extra items, but
+    // the total is off (real-world case: tax/shipping on TOTAL with no
+    // SUBTOTAL to fall back on). This should still be a full match — the
+    // mismatch is surfaced via invoiceTotalMatch for the UI to show as a
+    // warning, not used to reject the match itself.
+    const { lineResults, extraLineItems, invoiceTotalMatch } = computeLineMatches(
+      [poItem({ expectedQty: 10, expectedUnitPrice: 25 })],
+      invoice([{ description: 'Espresso beans, 1kg', quantity: 10, unitPrice: 25, totalPrice: 250 }], 400)
+    );
+    expect(invoiceTotalMatch).toBe(false);
+    expect(isFullMatch(lineResults, extraLineItems, invoiceTotalMatch)).toBe(true);
   });
 });

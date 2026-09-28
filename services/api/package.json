@@ -16,6 +16,7 @@
   "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1113.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1113.0",
     "@aws-sdk/client-s3": "^3.1113.0",
     "@aws-sdk/client-textract": "^3.1112.0",
     "@prisma/client": "^6.19.3",

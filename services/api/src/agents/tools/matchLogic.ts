@@ -60,8 +60,12 @@ export function computeLineMatches(
   });
 
   const expectedTotal = poItems.reduce((sum, i) => sum + i.expectedQty * i.expectedUnitPrice, 0);
+  // Prefer SUBTOTAL when Textract found one — it excludes tax/shipping,
+  // which TOTAL almost never does, so comparing TOTAL against a pure
+  // qty*price sum flagged most genuinely-correct invoices.
+  const comparisonAmount = invoice.subtotalAmount ?? invoice.totalAmount;
   const invoiceTotalMatch =
-    invoice.totalAmount == null ? null : Math.abs(invoice.totalAmount - expectedTotal) <= TOTAL_TOLERANCE;
+    comparisonAmount == null ? null : Math.abs(comparisonAmount - expectedTotal) <= TOTAL_TOLERANCE;
 
   return { lineResults, extraLineItems: pool, invoiceTotalMatch };
 }
@@ -69,13 +73,15 @@ export function computeLineMatches(
 export function isFullMatch(
   lineResults: LineMatchResult[],
   extraLineItems: ExtractedLineItem[],
-  invoiceTotalMatch: boolean | null
+  _invoiceTotalMatch: boolean | null
 ): boolean {
-  return (
-    lineResults.every((r) => r.qtyMatch && r.priceMatch) &&
-    extraLineItems.length === 0 &&
-    invoiceTotalMatch !== false
-  );
+  // invoiceTotalMatch is still computed and returned (see
+  // computeLineMatches) so the UI can show a mismatch as a warning — real
+  // invoices routinely fail this check for reasons that have nothing to do
+  // with the PO being wrong (tax, shipping, a rounding convention), so it
+  // no longer gates matched-vs-flagged. Line-item agreement and no
+  // unexplained extra items are what actually decide the match.
+  return lineResults.every((r) => r.qtyMatch && r.priceMatch) && extraLineItems.length === 0;
 }
 
 // Still a heuristic substring matcher, not a rewrite into something

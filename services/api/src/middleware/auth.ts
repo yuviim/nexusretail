@@ -34,20 +34,26 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
 
   try {
     const payload = await verifier.verify(token);
-    const email = payload.email as string | undefined;
-
-    if (!email) {
-      return res.status(403).json({ error: 'Token has no email claim' });
-    }
+    const sub = payload.sub;
 
     // custom:tenant_id used to be read straight off the JWT and trusted.
     // That claim is user-writable (or was, before write_attributes and
     // allow_admin_create_user_only locked it down) — a valid, freshly
     // signed token proves who someone authenticated as, not which tenant
-    // they belong to. Tenant membership is looked up here from our own
-    // `users` table instead, keyed on the verified email, so a token can no
-    // longer assert its way into another tenant's data.
-    const user = await prisma.user.findUnique({ where: { email } });
+    // they belong to. Looking that up from our own `users` table by email
+    // closed that hole but opened a narrower one: email was still in
+    // write_attributes, and POST /team only ever created a database row,
+    // never the matching Cognito user — so a user from another tenant
+    // could change their own Cognito email to an email a victim tenant had
+    // just added to /team but who hadn't signed in yet, and land in the
+    // victim's tenant on their next token. `sub` is Cognito's immutable
+    // subject claim; nothing after account creation can change which row
+    // it resolves to.
+    if (payload.email_verified !== true) {
+      return res.status(403).json({ error: 'Email must be verified' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { cognitoSub: sub } });
 
     if (!user) {
       return res.status(403).json({ error: 'No account provisioned for this user' });

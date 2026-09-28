@@ -6,6 +6,12 @@ import { prisma } from './prisma';
 import { requireAuth, requireSuperAdmin, requireRole, AuthenticatedRequest } from './middleware/auth';
 import multer from 'multer';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  CognitoIdentityProviderClient,
+  AdminCreateUserCommand,
+  AdminDeleteUserCommand,
+  UsernameExistsException,
+} from '@aws-sdk/client-cognito-identity-provider';
 import morgan from 'morgan';
 
 dotenv.config();
@@ -15,6 +21,8 @@ const PORT = process.env.PORT || 8080;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'eu-central-1' });
 const INVOICES_BUCKET = process.env.INVOICES_BUCKET || 'nexusretail-dev-invoices-102268067799';
+const cognito = new CognitoIdentityProviderClient({ region: process.env.AWS_REGION || 'eu-central-1' });
+const COGNITO_USER_POOL_ID = process.env.COGNITO_USER_POOL_ID!;
 
 // cors() with no options reflects whatever Origin header shows up, which is
 // the same as allowing every origin. ALLOWED_ORIGIN is set per environment
@@ -298,20 +306,61 @@ app.get('/team', requireAuth, async (req: AuthenticatedRequest, res) => {
 });
 
 app.post('/team', requireAuth, requireRole('owner'), async (req: AuthenticatedRequest, res) => {
+  const { email, name, role } = req.body as { email: string; name: string; role: string };
+  const validRoles = ['owner', 'staff', 'read_only'];
+
+  if (!email || !name || !validRoles.includes(role)) {
+    return res.status(400).json({ error: `role must be one of: ${validRoles.join(', ')}` });
+  }
+
+  // This used to only create the database row and leave the actual Cognito
+  // account to be created by hand, out of band. That gap is what let a
+  // second tenant's user race an invited-but-not-yet-signed-in email: the
+  // DB row (and the tenant it belonged to) existed before any Cognito
+  // account did, so nothing tied the two together until whoever signed in
+  // first with that email claimed it. Creating the Cognito user here, and
+  // storing the `sub` it returns immediately, closes that window entirely.
+  let cognitoSub: string;
   try {
-    const { email, name, role } = req.body as { email: string; name: string; role: string };
-    const validRoles = ['owner', 'staff', 'read_only'];
-
-    if (!email || !name || !validRoles.includes(role)) {
-      return res.status(400).json({ error: `role must be one of: ${validRoles.join(', ')}` });
+    const result = await cognito.send(
+      new AdminCreateUserCommand({
+        UserPoolId: COGNITO_USER_POOL_ID,
+        Username: email,
+        UserAttributes: [
+          { Name: 'email', Value: email },
+          { Name: 'email_verified', Value: 'true' },
+          { Name: 'name', Value: name },
+        ],
+      })
+    );
+    const sub = result.User?.Attributes?.find((a) => a.Name === 'sub')?.Value;
+    if (!sub) {
+      throw new Error('Cognito did not return a sub for the new user');
     }
+    cognitoSub = sub;
+  } catch (err) {
+    if (err instanceof UsernameExistsException) {
+      return res.status(409).json({ error: 'A Cognito user with this email already exists' });
+    }
+    console.error(err);
+    return res.status(502).json({ error: 'Failed to create the Cognito user' });
+  }
 
+  try {
     const user = await prisma.user.create({
-      data: { tenantId: req.tenantId as string, email, name, role },
+      data: { tenantId: req.tenantId as string, email, name, role, cognitoSub },
     });
-
     res.status(201).json(user);
   } catch (err: any) {
+    // Don't leave an orphaned Cognito user behind if the DB row couldn't be
+    // created (most likely: this email already has a `users` row, so the
+    // @unique on email conflicts, even though the Cognito call above
+    // succeeded because that email had no Cognito account yet).
+    try {
+      await cognito.send(new AdminDeleteUserCommand({ UserPoolId: COGNITO_USER_POOL_ID, Username: email }));
+    } catch (cleanupErr) {
+      console.error('Failed to roll back Cognito user after DB error:', cleanupErr);
+    }
     if (err.code === 'P2002') {
       return res.status(409).json({ error: 'A user with this email already exists' });
     }
@@ -408,6 +457,23 @@ app.post(
         return res.status(400).json({ error: 'No file uploaded' });
       }
 
+      // Textract's AnalyzeExpense accepts PDF, PNG, and JPEG, but the S3
+      // key used to hardcode a .pdf extension regardless of what was
+      // actually uploaded. Reject anything else up front instead of
+      // storing it under a lying extension and letting Textract fail on
+      // it downstream.
+      const MIME_EXTENSIONS: Record<string, string> = {
+        'application/pdf': 'pdf',
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+      };
+      const fileExtension = MIME_EXTENSIONS[req.file.mimetype];
+      if (!fileExtension) {
+        return res.status(400).json({
+          error: `Unsupported file type "${req.file.mimetype}". Upload a PDF, PNG, or JPEG.`,
+        });
+      }
+
       const { extractInvoice } = await import('./agents/tools/extractInvoice');
       const { findPurchaseOrderByNumber } = await import('./agents/tools/findPurchaseOrderByNumber');
       const { matchPurchaseOrder } = await import('./agents/tools/matchPurchaseOrder');
@@ -432,7 +498,7 @@ app.post(
       // `uploads/{timestamp}-{originalname}`: the old key had no tenant
       // boundary in the object path and forwarded the caller's filename
       // (unsanitized) straight into S3.
-      const s3Key = `invoices/${tenantId}/${crypto.randomUUID()}.pdf`;
+      const s3Key = `invoices/${tenantId}/${crypto.randomUUID()}.${fileExtension}`;
       console.log(`[invoice-upload] received file "${req.file.originalname}" (${req.file.size} bytes), tenant=${tenantId}`);
 
       await s3.send(new PutObjectCommand({
